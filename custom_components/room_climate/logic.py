@@ -342,6 +342,7 @@ def evaluate_room(
     outside_temp = outside_weather.get("temperature")
     outside_wind = outside_weather.get("wind_speed")
     window_state = metrics.get(CONF_WINDOW)
+    cover_state = metrics.get(CONF_COVER)
     window_open = window_state in {"on", "open", "tilted"}
     solar_exposure = get_solar_exposure(room, sun, outside_weather)
     orientation_label = ORIENTATION_LABEL.get(str(room.get(CONF_WINDOW_ORIENTATION, "")).upper())
@@ -356,6 +357,19 @@ def evaluate_room(
     can_cool = cooling_delta is not None and inside_temp is not None and inside_temp >= 27 and cooling_delta >= required_cooling_delta
     strong_cooling = cooling_delta is not None and inside_temp is not None and inside_temp >= 29 and cooling_delta >= strong_cooling_delta
     cooling_window = get_next_cooling_window(room, forecast, solar_exposure)
+    dehumidify_beneficial = bool(
+        room.get(CONF_WINDOW)
+        and diff is not None
+        and (
+            (humidity_very_high and diff >= profile["vent_strong"])
+            or (humidity_high and diff >= profile["vent_moderate"])
+        )
+    )
+    cooling_beneficial = bool(
+        room.get(CONF_WINDOW)
+        and can_cool
+        and not (diff is not None and diff <= -1.5 and not strong_cooling)
+    )
 
     dehumidify_text = None
     dehumidify_level = None
@@ -449,10 +463,11 @@ def evaluate_room(
         recommendation_parts.append(f"Abkuehlung: {cooling_text}")
     recommendation = " | ".join(recommendation_parts) if recommendation_parts else "Keine Fenstersensor-Empfehlung verfuegbar"
 
-    ventilate_now = bool(dehumidify_level in {"recommended", "short"} or cooling_level == "cooling")
+    ventilate_now = bool(dehumidify_beneficial or cooling_beneficial)
     close_window = bool(window_open and not ventilate_now)
     close_cover = bool(
         room.get(CONF_COVER)
+        and cover_state not in {"closed", "closing"}
         and solar_exposure["level"] == "direct"
         and inside_temp is not None
         and inside_temp >= 25
@@ -479,6 +494,7 @@ def evaluate_room(
         "window_open": window_open,
         "window_orientation": orientation_label,
         "solar_exposure": solar_exposure["label"],
+        "cover_state": cover_state,
         "cover_entity": room.get(CONF_COVER),
         "notification_flags": {
             NOTIFICATION_VENTILATE: ventilate_now,

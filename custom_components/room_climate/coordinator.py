@@ -114,9 +114,10 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "simmer",
             "dewpoint",
             "window",
+            "cover",
         ):
             entity_id = room.get(key)
-            if key in {"scharlau", "humidex", "simmer", "dewpoint", "window"}:
+            if key in {"scharlau", "humidex", "simmer", "dewpoint", "window", "cover"}:
                 metrics[key] = self._get_state(entity_id)
             else:
                 metrics[key] = as_float(self._get_state(entity_id))
