@@ -138,58 +138,36 @@ class RoomClimateCard extends HTMLElement {
   }
 
   async requestOutsideForecast(entityId, requestId) {
-    const wsCandidates = [
-      { type: "weather/subscribe_forecast", forecast_type: "hourly", entity_id: entityId, subscribe: true },
-      { type: "weather/forecast", forecast_type: "hourly", entity_id: entityId },
-      { type: "weather/get_forecast", forecast_type: "hourly", entity_id: entityId },
-      { type: "weather/get_forecasts", forecast_type: "hourly", entity_id: entityId },
-    ];
-
     const connection = this._hass?.connection;
-    const callWS = this._hass?.callWS?.bind(this._hass);
-
-    for (const candidate of wsCandidates) {
-      try {
-        if (candidate.subscribe && connection?.subscribeMessage) {
-          const unsubscribe = await connection.subscribeMessage(
-            (message) => {
-              if (requestId !== this._outsideForecastRequestId || this.config?.outside_weather !== entityId) return;
-              this.setOutsideForecast(entityId, message);
-            },
-            candidate
-          );
-
-          if (requestId !== this._outsideForecastRequestId || this.config?.outside_weather !== entityId) {
-            if (typeof unsubscribe === "function") {
-              unsubscribe();
-            }
-            return false;
-          }
-
-          this._outsideForecastUnsubscribe = unsubscribe;
-          return true;
-        }
-
-        if (callWS) {
-          const result = await callWS(candidate);
-          if (requestId !== this._outsideForecastRequestId || this.config?.outside_weather !== entityId) {
-            return false;
-          }
-
-          const forecast = this.extractForecastEntries(result, entityId);
-          if (forecast.length) {
-            this._outsideForecastEntityId = entityId;
-            this._outsideForecast = forecast;
-            this.scheduleRender();
-            return true;
-          }
-        }
-      } catch (_error) {
-        // Try the next Home Assistant forecast API variant.
-      }
+    if (!connection?.subscribeMessage) {
+      return false;
     }
 
-    return false;
+    try {
+      const unsubscribe = await connection.subscribeMessage(
+        (message) => {
+          if (requestId !== this._outsideForecastRequestId || this.config?.outside_weather !== entityId) return;
+          this.setOutsideForecast(entityId, message);
+        },
+        {
+          type: "weather/subscribe_forecast",
+          forecast_type: "hourly",
+          entity_id: entityId,
+        }
+      );
+
+      if (requestId !== this._outsideForecastRequestId || this.config?.outside_weather !== entityId) {
+        if (typeof unsubscribe === "function") {
+          unsubscribe();
+        }
+        return false;
+      }
+
+      this._outsideForecastUnsubscribe = unsubscribe;
+      return true;
+    } catch (_error) {
+      return false;
+    }
   }
 
   ensureOutsideForecast() {
