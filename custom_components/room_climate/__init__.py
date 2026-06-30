@@ -7,11 +7,19 @@ from homeassistant.components.frontend import add_extra_js_url, remove_extra_js_
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 
-from .const import CARD_FILENAME, CARD_URL_PATH, DOMAIN, PLATFORMS
+from .const import CARD_FILENAME, CARD_URL_PATH, CONF_ROOMS, DOMAIN, PLATFORMS
 from .coordinator import IntegrationData, RoomClimateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+ROOM_ENTITY_SUFFIXES = (
+    "_score",
+    "_recommendation",
+    "_ventilate_now",
+    "_close_window",
+    "_close_cover",
+)
 
 
 def _card_resource_url(card_path: Path) -> str:
@@ -19,6 +27,52 @@ def _card_resource_url(card_path: Path) -> str:
     # loads the updated card bundle after integration upgrades.
     version_token = int(card_path.stat().st_mtime)
     return f"{CARD_URL_PATH}?v={version_token}"
+
+
+def _configured_room_ids(entry: ConfigEntry) -> set[str]:
+    config = {**entry.data, **entry.options}
+    return {
+        room["id"]
+        for room in config.get(CONF_ROOMS, [])
+        if isinstance(room, dict) and room.get("id")
+    }
+
+
+def _extract_room_id_from_unique_id(unique_id: str, entry_id: str) -> str | None:
+    prefix = f"{entry_id}_"
+    if not unique_id.startswith(prefix):
+        return None
+
+    remainder = unique_id[len(prefix):]
+    for suffix in ROOM_ENTITY_SUFFIXES:
+        if remainder.endswith(suffix):
+            return remainder[: -len(suffix)]
+    return None
+
+
+def _extract_room_id_from_identifiers(identifiers: set[tuple[str, str]], entry_id: str) -> str | None:
+    prefix = f"{entry_id}_"
+    for domain, identifier in identifiers:
+        if domain != DOMAIN or not identifier.startswith(prefix):
+            continue
+        return identifier[len(prefix):]
+    return None
+
+
+def _prune_removed_room_registry_entries(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    configured_room_ids = _configured_room_ids(entry)
+    entity_registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
+
+    for entity_entry in er.async_entries_for_config_entry(entity_registry, entry.entry_id):
+        room_id = _extract_room_id_from_unique_id(entity_entry.unique_id, entry.entry_id)
+        if room_id and room_id not in configured_room_ids:
+            entity_registry.async_remove(entity_entry.entity_id)
+
+    for device_entry in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
+        room_id = _extract_room_id_from_identifiers(device_entry.identifiers, entry.entry_id)
+        if room_id and room_id not in configured_room_ids:
+            device_registry.async_remove_device(device_entry.id)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -47,6 +101,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await coordinator.async_config_entry_first_refresh()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _prune_removed_room_registry_entries(hass, entry)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True
 
@@ -67,5 +122,4 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    await async_unload_entry(hass, entry)
-    await async_setup_entry(hass, entry)
+    await hass.config_entries.async_reload(entry.entry_id)
