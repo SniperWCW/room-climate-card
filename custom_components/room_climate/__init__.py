@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from homeassistant.components.frontend import add_extra_js_url, remove_extra_js_url
@@ -9,6 +10,8 @@ from homeassistant.core import HomeAssistant
 
 from .const import CARD_FILENAME, CARD_URL_PATH, DOMAIN, PLATFORMS
 from .coordinator import IntegrationData, RoomClimateCoordinator
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -22,9 +25,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if not domain_data.get("card_registered"):
         card_path = Path(__file__).parent / "www" / CARD_FILENAME
-        await hass.http.async_register_static_paths(
-            [StaticPathConfig(CARD_URL_PATH, str(card_path), cache_headers=False)]
-        )
+        try:
+            await hass.http.async_register_static_paths(
+                [StaticPathConfig(CARD_URL_PATH, str(card_path), cache_headers=False)]
+            )
+        except RuntimeError as err:
+            if "method GET is already registered" not in str(err):
+                raise
+            _LOGGER.debug("Static path %s was already registered, reusing it", CARD_URL_PATH)
         add_extra_js_url(hass, CARD_URL_PATH)
         domain_data["card_registered"] = True
 
