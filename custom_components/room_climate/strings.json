@@ -1,0 +1,37 @@
+{
+  "title": "Room Climate",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Room Climate einrichten",
+        "description": "Globale Entitaeten und Push-Einstellungen fuer Room Climate."
+      }
+    },
+    "error": {},
+    "abort": {
+      "single_instance_allowed": "Room Climate kann nur einmal eingerichtet werden."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Room Climate verwalten"
+      },
+      "global": {
+        "title": "Globale Einstellungen"
+      },
+      "add_room": {
+        "title": "Raum hinzufuegen"
+      },
+      "edit_room_select": {
+        "title": "Raum auswaehlen"
+      },
+      "edit_room": {
+        "title": "Raum bearbeiten"
+      },
+      "remove_room": {
+        "title": "Raum entfernen"
+      }
+    }
+  }
+}

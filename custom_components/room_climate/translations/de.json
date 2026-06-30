@@ -1,0 +1,98 @@
+{
+  "title": "Room Climate",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Room Climate einrichten",
+        "description": "Globale Entitäten und Push-Einstellungen für Room Climate.",
+        "data": {
+          "name": "Name",
+          "outside_absolute_humidity": "Absolute Außenluftfeuchtigkeit",
+          "outside_weather": "Wetter-Entity außen",
+          "sun_entity": "Sonnen-Entity",
+          "notification_enabled": "Push-Benachrichtigungen aktivieren",
+          "notify_service": "Notify-Service",
+          "notification_cooldown": "Push-Abstand in Minuten"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Room Climate kann nur einmal eingerichtet werden."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Room Climate verwalten",
+        "menu_options": {
+          "global": "Globale Einstellungen",
+          "add_room": "Raum hinzufügen",
+          "edit_room_select": "Raum bearbeiten",
+          "remove_room": "Raum entfernen"
+        }
+      },
+      "global": {
+        "title": "Globale Einstellungen",
+        "data": {
+          "name": "Name",
+          "outside_absolute_humidity": "Absolute Außenluftfeuchtigkeit",
+          "outside_weather": "Wetter-Entity außen",
+          "sun_entity": "Sonnen-Entity",
+          "notification_enabled": "Push-Benachrichtigungen aktivieren",
+          "notify_service": "Notify-Service",
+          "notification_cooldown": "Push-Abstand in Minuten"
+        }
+      },
+      "add_room": {
+        "title": "Raum hinzufügen",
+        "data": {
+          "name": "Raumname",
+          "room_type": "Raumtyp",
+          "window_orientation": "Fensterausrichtung",
+          "temperature": "Temperatur-Sensor",
+          "humidity": "Luftfeuchtigkeit-Sensor",
+          "inside_absolute_humidity": "Absolute Innenluftfeuchtigkeit",
+          "window": "Fenstersensor",
+          "cover": "Rollladen/Cover",
+          "humidex_value": "Humidex Wert",
+          "scharlau": "Sommer Scharlau gefühlt",
+          "humidex": "Humidex gefühlt",
+          "simmer": "Sommer Simmer gefühlt",
+          "dewpoint": "Taupunkt gefühlt",
+          "notifications_enabled": "Push für diesen Raum aktivieren"
+        }
+      },
+      "edit_room_select": {
+        "title": "Raum auswählen",
+        "data": {
+          "id": "Raum"
+        }
+      },
+      "edit_room": {
+        "title": "Raum bearbeiten",
+        "data": {
+          "name": "Raumname",
+          "room_type": "Raumtyp",
+          "window_orientation": "Fensterausrichtung",
+          "temperature": "Temperatur-Sensor",
+          "humidity": "Luftfeuchtigkeit-Sensor",
+          "inside_absolute_humidity": "Absolute Innenluftfeuchtigkeit",
+          "window": "Fenstersensor",
+          "cover": "Rollladen/Cover",
+          "humidex_value": "Humidex Wert",
+          "scharlau": "Sommer Scharlau gefühlt",
+          "humidex": "Humidex gefühlt",
+          "simmer": "Sommer Simmer gefühlt",
+          "dewpoint": "Taupunkt gefühlt",
+          "notifications_enabled": "Push für diesen Raum aktivieren"
+        }
+      },
+      "remove_room": {
+        "title": "Raum entfernen",
+        "data": {
+          "id": "Raum"
+        }
+      }
+    }
+  }
+}

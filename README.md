@@ -1,42 +1,48 @@
-# Room Climate Card
+# Room Climate
 
-Custom Lovelace card for Home Assistant with:
+Custom Home Assistant integration with bundled Lovelace card.
 
-- room climate scoring
+Features:
+
+- room climate scoring per room
 - separate advice for dehumidifying and cooling
-- optional ventilation time forecast based on weather data
-- editor support for room sensors and `thermal_comfort` entities
+- hourly ventilation window forecast from `weather.*`
+- optional `sun.sun` and window orientation handling
+- binary sensors for:
+  - ventilate now
+  - close window
+  - close cover / roller shade
+- optional push notifications via any `notify.*` service
+- bundled `custom:room-climate-card` auto-loaded by the integration
 
 ## HACS
 
-Add this repository as a custom dashboard repository in HACS and install it as a frontend card.
+Add this repository as a custom integration repository in HACS and install it as an integration.
 
-After installation, use the card type:
+After restart:
+
+1. Add the integration in Home Assistant.
+2. Configure global entities and rooms via the integration options.
+3. Use the Lovelace card type:
 
 ```yaml
 type: custom:room-climate-card
 ```
 
-## Expected Entities
+You do not need to add a separate Lovelace resource manually. The integration registers the card automatically.
 
-Per room, the card can use:
+## Created Entities
 
-- temperature
-- relative humidity
-- inside absolute humidity
-- humidex value
-- humidex felt
-- summer scharlau felt
-- summer simmer felt
-- dewpoint felt
-- optional window sensor
+For each configured room, the integration creates:
 
-Global entities:
-
-- outside absolute humidity
-- optional `weather.*` entity for wind and cooling forecast
+- `sensor.<room>_score`
+- `sensor.<room>_recommendation`
+- `binary_sensor.<room>_ventilate_now`
+- `binary_sensor.<room>_close_window`
+- `binary_sensor.<room>_close_cover`
 
 ## Notes
 
-- Dehumidifying and cooling advice are shown separately.
-- If forecast data is available on the selected weather entity, the card shows the next likely ventilation window.
+- Push notifications are sent only when the recommendation changes from inactive to active.
+- A configurable cooldown prevents repeated notifications.
+- The bundled Lovelace card is still useful for rich per-room display, while the integration handles backend logic and automation-friendly entities.
