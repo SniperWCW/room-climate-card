@@ -20,6 +20,7 @@ class RoomClimateCard extends HTMLElement {
       columns: 2,
       outside_absolute_humidity: RoomClimateCardEditor.findGlobalOutsideHumidity(hass),
       outside_weather: RoomClimateCardEditor.findGlobalWeatherEntity(hass),
+      sun_entity: RoomClimateCardEditor.findGlobalSunEntity(hass),
       rooms: rooms.length ? rooms : [RoomClimateCardEditor.createEmptyRoom()],
     };
   }
@@ -30,6 +31,7 @@ class RoomClimateCard extends HTMLElement {
       columns: 2,
       outside_absolute_humidity: "",
       outside_weather: "",
+      sun_entity: "",
       rooms: [],
       ...config,
     };
@@ -79,11 +81,35 @@ class RoomClimateCard extends HTMLElement {
     const temperature = Number(attrs.temperature);
     const humidity = Number(attrs.humidity);
     const windSpeed = Number(attrs.wind_speed);
+    const cloudCoverage = Number(attrs.cloud_coverage);
 
     return {
       temperature: Number.isFinite(temperature) ? temperature : null,
       humidity: Number.isFinite(humidity) ? humidity : null,
       windSpeed: Number.isFinite(windSpeed) ? windSpeed : null,
+      cloudCoverage: Number.isFinite(cloudCoverage) ? cloudCoverage : null,
+    };
+  }
+
+  getSunMetrics() {
+    const entityId = this.config?.sun_entity;
+    if (!entityId) {
+      return {
+        azimuth: null,
+        elevation: null,
+        aboveHorizon: false,
+      };
+    }
+
+    const stateObj = this._hass?.states?.[entityId];
+    const attrs = stateObj?.attributes || {};
+    const azimuth = Number(attrs.azimuth);
+    const elevation = Number(attrs.elevation);
+
+    return {
+      azimuth: Number.isFinite(azimuth) ? azimuth : null,
+      elevation: Number.isFinite(elevation) ? elevation : null,
+      aboveHorizon: stateObj?.state === "above_horizon",
     };
   }
 
@@ -225,7 +251,68 @@ class RoomClimateCard extends HTMLElement {
 
   getRecommendedCoolTempThreshold(room) {
     const profile = this.getRoomProfile(room);
-    return Math.min(profile.tempMax + 4, 26);
+    const solarExposure = this.getSolarExposure(room);
+    let threshold = Math.min(profile.tempMax + 4, 26);
+
+    if (solarExposure.level === "direct") {
+      threshold -= 1.5;
+    } else if (solarExposure.level === "indirect") {
+      threshold -= 0.5;
+    }
+
+    return Math.max(20, threshold);
+  }
+
+  getOrientationAzimuth(orientation) {
+    const map = {
+      n: 0,
+      no: 45,
+      ne: 45,
+      o: 90,
+      e: 90,
+      so: 135,
+      se: 135,
+      s: 180,
+      sw: 225,
+      w: 270,
+      nw: 315,
+    };
+
+    return map[String(orientation || "").toLowerCase()] ?? null;
+  }
+
+  getAngularDifference(a, b) {
+    const diff = Math.abs(a - b) % 360;
+    return diff > 180 ? 360 - diff : diff;
+  }
+
+  getSolarExposure(room) {
+    const orientation = String(room.window_orientation || "").toLowerCase();
+    const facadeAzimuth = this.getOrientationAzimuth(orientation);
+    const sun = this.getSunMetrics();
+    const outsideWeather = this.getOutsideWeatherMetrics();
+
+    if (facadeAzimuth === null || !sun.aboveHorizon || sun.azimuth === null || sun.elevation === null || sun.elevation < 8) {
+      return { level: "none", label: "kein relevanter Sonneneintrag" };
+    }
+
+    const angleDiff = this.getAngularDifference(sun.azimuth, facadeAzimuth);
+    const cloudCoverage = outsideWeather.cloudCoverage;
+    const heavyClouds = cloudCoverage !== null && cloudCoverage >= 85;
+    const moderateClouds = cloudCoverage !== null && cloudCoverage >= 65;
+
+    if (angleDiff <= 65 && sun.elevation >= 12 && !heavyClouds) {
+      return {
+        level: moderateClouds ? "indirect" : "direct",
+        label: moderateClouds ? "leichter Sonneneintrag" : "direkter Sonneneintrag",
+      };
+    }
+
+    if (angleDiff <= 95 && sun.elevation >= 10 && !heavyClouds) {
+      return { level: "indirect", label: "leichter Sonneneintrag" };
+    }
+
+    return { level: "none", label: "kein relevanter Sonneneintrag" };
   }
 
   getNextCoolingWindow(room) {
@@ -344,6 +431,21 @@ class RoomClimateCard extends HTMLElement {
     return profiles[room.room_type] || profiles.default;
   }
 
+  formatOrientationLabel(orientation) {
+    const map = {
+      N: "Nord",
+      NO: "Nordost",
+      O: "Ost",
+      SO: "Südost",
+      S: "Süd",
+      SW: "Südwest",
+      W: "West",
+      NW: "Nordwest",
+    };
+
+    return map[String(orientation || "").toUpperCase()] || null;
+  }
+
   getVentilationContext(room) {
     const profile = this.getRoomProfile(room);
     const insideTemp = this.getNumber(room.temperature);
@@ -353,6 +455,7 @@ class RoomClimateCard extends HTMLElement {
     const outsideWeather = this.getOutsideWeatherMetrics();
     const outsideTemp = outsideWeather.temperature;
     const outsideWind = outsideWeather.windSpeed;
+    const solarExposure = this.getSolarExposure(room);
     const hasWindowSensor = Boolean(room.window);
     const windowState = this.getState(room.window);
     const windowOpen = ["on", "open", "tilted"].includes(windowState);
@@ -363,8 +466,10 @@ class RoomClimateCard extends HTMLElement {
     const strongDiff = profile.ventStrongDiff ?? 1.5;
     const diff = insideAbs !== null && outsideAbs !== null ? insideAbs - outsideAbs : null;
     const coolingDelta = insideTemp !== null && outsideTemp !== null ? insideTemp - outsideTemp : null;
-    const canCool = coolingDelta !== null && insideTemp >= 27 && coolingDelta >= 2;
-    const strongCooling = coolingDelta !== null && insideTemp >= 29 && coolingDelta >= 4;
+    const requiredCoolingDelta = 2 + (solarExposure.level === "direct" ? 1 : solarExposure.level === "indirect" ? 0.5 : 0);
+    const strongCoolingDelta = 4 + (solarExposure.level === "direct" ? 1 : solarExposure.level === "indirect" ? 0.5 : 0);
+    const canCool = coolingDelta !== null && insideTemp >= 27 && coolingDelta >= requiredCoolingDelta;
+    const strongCooling = coolingDelta !== null && insideTemp >= 29 && coolingDelta >= strongCoolingDelta;
 
     return {
       profile,
@@ -374,6 +479,7 @@ class RoomClimateCard extends HTMLElement {
       outsideAbs,
       outsideTemp,
       outsideWind,
+      solarExposure,
       hasWindowSensor,
       windowState,
       windowOpen,
@@ -384,6 +490,7 @@ class RoomClimateCard extends HTMLElement {
       strongDiff,
       diff,
       coolingDelta,
+      requiredCoolingDelta,
       canCool,
       strongCooling,
     };
@@ -474,10 +581,16 @@ class RoomClimateCard extends HTMLElement {
     }
 
     if (!ctx.canCool) {
+      const sunText =
+        ctx.solarExposure.level === "direct"
+          ? " Zusätzlicher Sonneneintrag spricht aktuell ebenfalls gegen Lüften."
+          : ctx.solarExposure.level === "indirect"
+            ? " Leichter Sonneneintrag bremst die Abkühlung zusätzlich."
+            : "";
       return {
         icon: "🌡️",
         level: "neutral",
-        text: "Fenster geschlossen halten. Außenluft bringt derzeit keine nennenswerte Abkühlung.",
+        text: `Fenster geschlossen halten. Außenluft bringt derzeit keine nennenswerte Abkühlung.${sunText}`,
       };
     }
 
@@ -843,6 +956,8 @@ class RoomClimateCard extends HTMLElement {
     const humidexText = this.getHumidexText(this.getState(room.humidex));
     const description = this.getDescription(room, score, temp, dewText, humidexText);
     const ventilationClass = ventilation ? `vent-${ventilation.level}` : "vent-none";
+    const solarExposure = this.getSolarExposure(room);
+    const orientationLabel = this.formatOrientationLabel(room.window_orientation);
 
     const windowText = room.window
       ? ["on", "open", "tilted"].includes(windowState)
@@ -896,6 +1011,7 @@ class RoomClimateCard extends HTMLElement {
           <div><b>🎯 Zielbereich:</b> ${profile.humidityMin}–${profile.humidityMax} % · ${profile.tempMin}–${profile.tempMax} °C</div>
           <div><b>Humidex:</b> ${humidexValue?.toFixed(1) ?? "-"}</div>
           <div><b>Sommer Simmer:</b> ${simmerText}</div>
+          ${orientationLabel ? `<div><b>☀️ Fensterlage:</b> ${orientationLabel} · ${solarExposure.label}</div>` : ""}
           <div><b>🪟 Fenster:</b> ${windowText}</div>
         </div>
       </div>
@@ -1086,6 +1202,7 @@ class RoomClimateCardEditor extends HTMLElement {
       simmer: "",
       dewpoint: "",
       window: "",
+      window_orientation: "",
     };
   }
 
@@ -1112,6 +1229,13 @@ class RoomClimateCardEditor extends HTMLElement {
   static findGlobalWeatherEntity(hass) {
     if (!hass) return "";
     return Object.keys(hass.states || {}).find((entityId) => entityId.startsWith("weather.")) || "";
+  }
+
+  static findGlobalSunEntity(hass) {
+    if (!hass) return "";
+    return Object.keys(hass.states || {}).find((entityId) => entityId === "sun.sun") ||
+      Object.keys(hass.states || {}).find((entityId) => entityId.startsWith("sun.")) ||
+      "";
   }
 
   static guessRoomType(name) {
@@ -1285,6 +1409,7 @@ class RoomClimateCardEditor extends HTMLElement {
       columns: 2,
       outside_absolute_humidity: "",
       outside_weather: "",
+      sun_entity: "",
       rooms: [],
       ...config,
     };
@@ -1471,6 +1596,7 @@ class RoomClimateCardEditor extends HTMLElement {
       outside_absolute_humidity:
         this.config.outside_absolute_humidity || RoomClimateCardEditor.findGlobalOutsideHumidity(this._hass),
       outside_weather: this.config.outside_weather || RoomClimateCardEditor.findGlobalWeatherEntity(this._hass),
+      sun_entity: this.config.sun_entity || RoomClimateCardEditor.findGlobalSunEntity(this._hass),
       rooms: detectedRooms.length ? detectedRooms : [RoomClimateCardEditor.createEmptyRoom()],
     };
     this._expandedRoomIndex = 0;
@@ -1524,6 +1650,14 @@ class RoomClimateCardEditor extends HTMLElement {
           allow-custom-entity
         ></ha-entity-picker>
 
+        <label>Sonnen-Entity (optional für Fensterausrichtung)</label>
+        <ha-entity-picker
+          id="sun_entity"
+          data-domains="sun"
+          value="${this.escapeHtml(this.config.sun_entity ?? "")}"
+          allow-custom-entity
+        ></ha-entity-picker>
+
         <div class="button-row">
           <button id="detect" type="button">Räume automatisch erkennen</button>
           <button id="add-room" type="button" class="secondary">Raum hinzufügen</button>
@@ -1539,6 +1673,10 @@ class RoomClimateCardEditor extends HTMLElement {
             <div>
               <b>Thermal Comfort</b>
               <div>Absolute Luftfeuchtigkeit, Humidex und Komfortwerte kommen aus thermal_comfort.</div>
+            </div>
+            <div>
+              <b>Fensterausrichtung</b>
+              <div>Optional mit sun.sun, damit Süd- und Westfenster bei aktuellem Sonneneintrag vorsichtiger bewertet werden.</div>
             </div>
           </div>
         </details>
@@ -1578,6 +1716,19 @@ class RoomClimateCardEditor extends HTMLElement {
                     <option value="kitchen" ${room.room_type === "kitchen" ? "selected" : ""}>Küche</option>
                     <option value="basement" ${room.room_type === "basement" ? "selected" : ""}>Keller</option>
                     <option value="office" ${room.room_type === "office" ? "selected" : ""}>Büro</option>
+                  </select>
+
+                  <label>Fensterausrichtung</label>
+                  <select data-i="${i}" data-key="window_orientation">
+                    <option value="" ${!room.window_orientation ? "selected" : ""}>Keine Angabe</option>
+                    <option value="N" ${room.window_orientation === "N" ? "selected" : ""}>Nord</option>
+                    <option value="NO" ${room.window_orientation === "NO" ? "selected" : ""}>Nordost</option>
+                    <option value="O" ${room.window_orientation === "O" ? "selected" : ""}>Ost</option>
+                    <option value="SO" ${room.window_orientation === "SO" ? "selected" : ""}>Südost</option>
+                    <option value="S" ${room.window_orientation === "S" ? "selected" : ""}>Süd</option>
+                    <option value="SW" ${room.window_orientation === "SW" ? "selected" : ""}>Südwest</option>
+                    <option value="W" ${room.window_orientation === "W" ? "selected" : ""}>West</option>
+                    <option value="NW" ${room.window_orientation === "NW" ? "selected" : ""}>Nordwest</option>
                   </select>
 
                   ${this.entityPicker(i, "temperature", "Temperatur im Raum (°C, Basis-Sensor)", room.temperature)}
@@ -1745,6 +1896,10 @@ class RoomClimateCardEditor extends HTMLElement {
 
     this.querySelector("#outside_weather")?.addEventListener("value-changed", (e) => {
       this.updateRoot("outside_weather", e.detail?.value ?? "");
+    });
+
+    this.querySelector("#sun_entity")?.addEventListener("value-changed", (e) => {
+      this.updateRoot("sun_entity", e.detail?.value ?? "");
     });
 
     this.querySelector("#detect")?.addEventListener("click", () => {
