@@ -132,35 +132,6 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
             "",
         )
 
-    area_rooms: list[dict[str, Any]] = []
-    for area in areas.async_list_areas():
-        room = {
-            CONF_ROOM_NAME: area.name,
-            CONF_ROOM_TYPE: _guess_room_type(area.name),
-            CONF_WINDOW_ORIENTATION: "",
-            CONF_TEMPERATURE: find_entity_for_area(area.id, ("temperatur",)) or find_entity_for_area(area.id, ("temperature",)),
-            CONF_HUMIDITY: find_entity_for_area(area.id, ("luftfeuchtigkeit",)) or find_entity_for_area(area.id, ("humidity",)),
-            CONF_INSIDE_ABSOLUTE_HUMIDITY: find_entity_for_area(area.id, ("absolute_luftfeuchtigkeit",))
-            or find_entity_for_area(area.id, ("absolute_humidity",)),
-            CONF_WINDOW: find_entity_for_area(area.id, ("fenster",), ("binary_sensor",))
-            or find_entity_for_area(area.id, ("window",), ("binary_sensor",)),
-            CONF_COVER: find_entity_for_area(area.id, ("cover",), ("cover",))
-            or find_entity_for_area(area.id, ("rollladen",), ("cover",))
-            or find_entity_for_area(area.id, ("rollerladen",), ("cover",))
-            or find_entity_for_area(area.id, ("shade",), ("cover",)),
-            CONF_HUMIDEX_VALUE: find_entity_for_area(area.id, ("thermal_comfort", "humidex")),
-            CONF_SCHARLAU: find_entity_for_area(area.id, ("thermal_comfort", "sommer_scharlau_gefuhlt")),
-            CONF_HUMIDEX: find_entity_for_area(area.id, ("thermal_comfort", "humidex_gefuhlt")),
-            CONF_SIMMER: find_entity_for_area(area.id, ("thermal_comfort", "sommer_simmer_gefuhlt")),
-            CONF_DEWPOINT: find_entity_for_area(area.id, ("thermal_comfort", "taupunkt_gefuhlt")),
-            CONF_ROOM_NOTIFICATIONS: True,
-        }
-        if any(room.get(key) for key in room if key not in {CONF_ROOM_NAME, CONF_ROOM_TYPE, CONF_WINDOW_ORIENTATION, CONF_ROOM_NOTIFICATIONS}):
-            area_rooms.append(room)
-
-    if area_rooms:
-        return area_rooms
-
     room_map: dict[str, dict[str, Any]] = {}
     ignore_parts = {
         "sensor",
@@ -208,6 +179,34 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
                 CONF_ROOM_NOTIFICATIONS: True,
             }
         return room_map[key]
+
+    for area in areas.async_list_areas():
+        room = ensure_room(area.name)
+        room[CONF_ROOM_TYPE] = _guess_room_type(area.name)
+        room[CONF_TEMPERATURE] = room[CONF_TEMPERATURE] or find_entity_for_area(area.id, ("temperatur",)) or find_entity_for_area(area.id, ("temperature",))
+        room[CONF_HUMIDITY] = room[CONF_HUMIDITY] or find_entity_for_area(area.id, ("luftfeuchtigkeit",)) or find_entity_for_area(area.id, ("humidity",))
+        room[CONF_INSIDE_ABSOLUTE_HUMIDITY] = (
+            room[CONF_INSIDE_ABSOLUTE_HUMIDITY]
+            or find_entity_for_area(area.id, ("absolute_luftfeuchtigkeit",))
+            or find_entity_for_area(area.id, ("absolute_humidity",))
+        )
+        room[CONF_WINDOW] = (
+            room[CONF_WINDOW]
+            or find_entity_for_area(area.id, ("fenster",), ("binary_sensor",))
+            or find_entity_for_area(area.id, ("window",), ("binary_sensor",))
+        )
+        room[CONF_COVER] = (
+            room[CONF_COVER]
+            or find_entity_for_area(area.id, ("cover",), ("cover",))
+            or find_entity_for_area(area.id, ("rollladen",), ("cover",))
+            or find_entity_for_area(area.id, ("rollerladen",), ("cover",))
+            or find_entity_for_area(area.id, ("shade",), ("cover",))
+        )
+        room[CONF_HUMIDEX_VALUE] = room[CONF_HUMIDEX_VALUE] or find_entity_for_area(area.id, ("thermal_comfort", "humidex"))
+        room[CONF_SCHARLAU] = room[CONF_SCHARLAU] or find_entity_for_area(area.id, ("thermal_comfort", "sommer_scharlau_gefuhlt"))
+        room[CONF_HUMIDEX] = room[CONF_HUMIDEX] or find_entity_for_area(area.id, ("thermal_comfort", "humidex_gefuhlt"))
+        room[CONF_SIMMER] = room[CONF_SIMMER] or find_entity_for_area(area.id, ("thermal_comfort", "sommer_simmer_gefuhlt"))
+        room[CONF_DEWPOINT] = room[CONF_DEWPOINT] or find_entity_for_area(area.id, ("thermal_comfort", "taupunkt_gefuhlt"))
 
     for entity_id in states:
         domain, _, object_id = entity_id.partition(".")
