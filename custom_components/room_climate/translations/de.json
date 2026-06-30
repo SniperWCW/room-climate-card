@@ -27,7 +27,7 @@
         "menu_options": {
           "global": "Globale Einstellungen",
           "import_detected_rooms": "Raeume aus Home Assistant auswaehlen",
-          "add_room": "Raum hinzufuegen",
+          "add_room_manual": "Raum manuell hinzufuegen",
           "edit_room_select": "Raum bearbeiten",
           "remove_room": "Raum entfernen"
         }
@@ -50,8 +50,8 @@
           "notification_cooldown": "Push-Abstand in Minuten"
         }
       },
-      "add_room": {
-        "title": "Raum hinzufuegen",
+      "add_room_manual": {
+        "title": "Raum manuell hinzufuegen",
         "data": {
           "name": "Raumname",
           "room_type": "Raumtyp",

@@ -415,9 +415,10 @@ class RoomClimateOptionsFlow(config_entries.OptionsFlow):
         return self.async_create_entry(title=current.get("title", DEFAULT_NAME), data=current)
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
-        options = ["global", "add_room"]
+        options = ["global"]
         if _available_detected_rooms(self.hass, self.rooms):
-            options.insert(1, "import_detected_rooms")
+            options.append("import_detected_rooms")
+        options.append("add_room_manual")
         if self.rooms:
             options.extend(["edit_room_select", "remove_room"])
         return self.async_show_menu(step_id="init", menu_options=options)
@@ -438,6 +439,11 @@ class RoomClimateOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(step_id="global", data_schema=_global_schema(self.hass, self.config))
 
     async def async_step_add_room(self, user_input: dict[str, Any] | None = None):
+        if _available_detected_rooms(self.hass, self.rooms):
+            return await self.async_step_import_detected_rooms(user_input)
+        return await self.async_step_add_room_manual(user_input)
+
+    async def async_step_add_room_manual(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
             room_id = slugify(user_input[CONF_ROOM_NAME])
             existing_ids = {room[CONF_ROOM_ID] for room in self.rooms}

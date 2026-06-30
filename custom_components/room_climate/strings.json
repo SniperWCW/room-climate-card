@@ -23,8 +23,8 @@
       "import_detected_rooms": {
         "title": "Raeume aus Home Assistant auswaehlen"
       },
-      "add_room": {
-        "title": "Raum hinzufuegen"
+      "add_room_manual": {
+        "title": "Raum manuell hinzufuegen"
       },
       "edit_room_select": {
         "title": "Raum auswaehlen"
