@@ -474,14 +474,10 @@ class RoomClimateCard extends HTMLElement {
     }
 
     if (!ctx.canCool) {
-      const waitText = coolingWindow.timeText
-        ? ` Voraussichtlicher Lüftungszeitpunkt: ab ${coolingWindow.timeText} Uhr, wenn die Außentemperatur unter ${coolingWindow.threshold.toFixed(1).replace(".", ",")} °C fällt.`
-        : ` Erst lüften, wenn die Außentemperatur unter etwa ${coolingWindow.threshold.toFixed(1).replace(".", ",")} °C fällt.`;
-
       return {
         icon: "🌡️",
         level: "neutral",
-        text: `Fenster geschlossen halten. Außenluft bringt derzeit keine nennenswerte Abkühlung.${waitText}`,
+        text: "Fenster geschlossen halten. Außenluft bringt derzeit keine nennenswerte Abkühlung.",
       };
     }
 
