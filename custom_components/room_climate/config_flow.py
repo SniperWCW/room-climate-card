@@ -54,12 +54,16 @@ def _guess_room_type(name: str) -> str:
     value = _normalized_slug(name)
     if "bad" in value or "badezimmer" in value:
         return "bathroom"
+    if "wc" in value or "toilet" in value:
+        return "bathroom"
     if "kuche" in value or "kueche" in value:
         return "kitchen"
     if "keller" in value:
         return "basement"
     if "kind" in value:
         return "child"
+    if "gastezimmer" in value or "gaestezimmer" in value:
+        return "bedroom"
     if "schlaf" in value:
         return "bedroom"
     if "buro" in value or "buero" in value:
@@ -67,6 +71,30 @@ def _guess_room_type(name: str) -> str:
     if "wohn" in value or "essen" in value:
         return "living"
     return "default"
+
+
+def _has_core_room_metrics(room: dict[str, Any]) -> bool:
+    return bool(room.get(CONF_TEMPERATURE) and room.get(CONF_HUMIDITY))
+
+
+def _has_room_supporting_signals(room: dict[str, Any]) -> bool:
+    return bool(
+        room.get(CONF_INSIDE_ABSOLUTE_HUMIDITY)
+        or room.get(CONF_WINDOW)
+        or room.get(CONF_COVER)
+        or room.get(CONF_HUMIDEX_VALUE)
+        or room.get(CONF_SCHARLAU)
+        or room.get(CONF_HUMIDEX)
+        or room.get(CONF_SIMMER)
+        or room.get(CONF_DEWPOINT)
+    )
+
+
+def _is_auto_detect_room_candidate(room: dict[str, Any]) -> bool:
+    room_type = room.get(CONF_ROOM_TYPE, "default")
+    if room_type != "default" and _has_core_room_metrics(room):
+        return True
+    return _has_core_room_metrics(room) and _has_room_supporting_signals(room)
 
 
 def _find_global_outside_humidity(hass) -> str:
@@ -217,6 +245,8 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
         if not parts:
             continue
         room_name = " ".join(part.capitalize() for part in parts)
+        if _guess_room_type(room_name) == "default":
+            continue
         room = ensure_room(room_name)
 
         if domain == "binary_sensor" and re.search(r"(fenster|window|kontakt|contact)", slug):
@@ -243,21 +273,7 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
     return [
         room
         for room in room_map.values()
-        if any(
-            room.get(key)
-            for key in (
-                CONF_TEMPERATURE,
-                CONF_HUMIDITY,
-                CONF_INSIDE_ABSOLUTE_HUMIDITY,
-                CONF_WINDOW,
-                CONF_COVER,
-                CONF_HUMIDEX_VALUE,
-                CONF_SCHARLAU,
-                CONF_HUMIDEX,
-                CONF_SIMMER,
-                CONF_DEWPOINT,
-            )
-        )
+        if _is_auto_detect_room_candidate(room)
     ]
 
 

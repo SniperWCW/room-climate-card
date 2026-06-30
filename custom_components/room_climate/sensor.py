@@ -63,6 +63,9 @@ class RoomClimateScoreSensor(RoomClimateBaseSensor):
     @property
     def extra_state_attributes(self):
         attrs = dict(self.room.attributes)
+        attrs["managed_by"] = DOMAIN
+        attrs["room_id"] = self.room.room_id
+        attrs["room_name"] = self.room.name
         attrs["level"] = self.room.level_label
         attrs["description"] = self.room.description
         attrs["recommendation"] = self.room.recommendation
@@ -85,6 +88,9 @@ class RoomClimateRecommendationSensor(RoomClimateBaseSensor):
     @property
     def extra_state_attributes(self):
         return {
+            "managed_by": DOMAIN,
+            "room_id": self.room.room_id,
+            "room_name": self.room.name,
             "recommendation": self.room.recommendation,
             "next_ventilation_window": self.room.next_window,
             "solar_exposure": self.room.solar_label,

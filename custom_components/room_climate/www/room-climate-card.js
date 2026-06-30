@@ -59,17 +59,30 @@ class RoomClimateCard extends HTMLElement {
     return Array.isArray(this.config?.rooms) && this.config.rooms.length > 0;
   }
 
+  isManagedScoreEntity(entityId, stateObj) {
+    if (!entityId.startsWith("sensor.") || !entityId.endsWith("_score")) return false;
+    const attrs = stateObj?.attributes || {};
+    if (attrs.managed_by === "room_climate") return true;
+
+    return Boolean(
+      attrs.room_type ||
+      attrs.room_id ||
+      attrs.room_name ||
+      attrs.description ||
+      attrs.recommendation ||
+      attrs.next_ventilation_window ||
+      attrs.solar_exposure ||
+      typeof attrs.window_open === "boolean"
+    );
+  }
+
   getManagedScoreEntities() {
     const states = Object.entries(this._hass?.states || {});
     const selectedEntities = Array.isArray(this.config?.room_entities) ? this.config.room_entities.filter(Boolean) : [];
     const selectedSet = new Set(selectedEntities);
 
     const entities = states
-      .filter(([entityId, stateObj]) => {
-        if (!entityId.startsWith("sensor.") || !entityId.endsWith("_score")) return false;
-        const attrs = stateObj?.attributes || {};
-        return Boolean(attrs.room_type && attrs.description && attrs.recommendation);
-      })
+      .filter(([entityId, stateObj]) => this.isManagedScoreEntity(entityId, stateObj))
       .sort(([, a], [, b]) => {
         const nameA = String(a?.attributes?.friendly_name || a?.entity_id || "");
         const nameB = String(b?.attributes?.friendly_name || b?.entity_id || "");
@@ -1662,11 +1675,7 @@ class RoomClimateCardEditor extends HTMLElement {
 
   getManagedScoreChoices() {
     return Object.entries(this._hass?.states || {})
-      .filter(([entityId, stateObj]) => {
-        if (!entityId.startsWith("sensor.") || !entityId.endsWith("_score")) return false;
-        const attrs = stateObj?.attributes || {};
-        return Boolean(attrs.room_type && attrs.description && attrs.recommendation);
-      })
+      .filter(([entityId, stateObj]) => this.isManagedScoreEntity(entityId, stateObj))
       .sort(([, a], [, b]) => {
         const nameA = String(a?.attributes?.friendly_name || "");
         const nameB = String(b?.attributes?.friendly_name || "");
