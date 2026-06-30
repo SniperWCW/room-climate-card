@@ -323,7 +323,7 @@ def _room_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             vol.Required(CONF_ROOM_TYPE, default=defaults.get(CONF_ROOM_TYPE, "default")): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=room_type_options, mode=selector.SelectSelectorMode.DROPDOWN)
             ),
-            vol.Required(CONF_WINDOW_ORIENTATION, default=defaults.get(CONF_WINDOW_ORIENTATION, "")): selector.SelectSelector(
+            vol.Optional(CONF_WINDOW_ORIENTATION, default=defaults.get(CONF_WINDOW_ORIENTATION, "")): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=orientation_options, mode=selector.SelectSelectorMode.DROPDOWN)
             ),
             vol.Required(CONF_TEMPERATURE, default=defaults.get(CONF_TEMPERATURE, "")): selector.EntitySelector(
