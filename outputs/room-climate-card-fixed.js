@@ -2,6 +2,11 @@ class RoomClimateCard extends HTMLElement {
   constructor() {
     super();
     this._renderScheduled = false;
+    this._outsideForecast = [];
+    this._outsideForecastEntityId = null;
+    this._outsideForecastUnsubscribe = null;
+    this._outsideForecastRequestId = 0;
+    this._outsideForecastLastRequestAt = 0;
   }
 
   static getConfigElement() {
@@ -20,8 +25,6 @@ class RoomClimateCard extends HTMLElement {
   }
 
   setConfig(config) {
-    const hadConfig = Boolean(this.config);
-
     this.config = {
       mode: "detailed",
       columns: 2,
@@ -30,11 +33,18 @@ class RoomClimateCard extends HTMLElement {
       rooms: [],
       ...config,
     };
+
+    this.ensureOutsideForecast();
   }
 
   set hass(hass) {
     this._hass = hass;
+    this.ensureOutsideForecast();
     this.scheduleRender();
+  }
+
+  disconnectedCallback() {
+    this.clearOutsideForecastSubscription();
   }
 
   scheduleRender() {
@@ -77,19 +87,151 @@ class RoomClimateCard extends HTMLElement {
     };
   }
 
+  clearOutsideForecastSubscription() {
+    if (typeof this._outsideForecastUnsubscribe === "function") {
+      this._outsideForecastUnsubscribe();
+    }
+
+    this._outsideForecastUnsubscribe = null;
+    this._outsideForecastRequestId += 1;
+    this._outsideForecastLastRequestAt = 0;
+  }
+
+  normalizeForecastEntries(forecast) {
+    if (!Array.isArray(forecast)) return [];
+
+    return forecast
+      .map((entry) => ({
+        datetime: entry?.datetime || entry?.datetime_iso || entry?.time || null,
+        temperature: Number(entry?.temperature),
+        humidity: Number(entry?.humidity),
+        windSpeed: Number(entry?.wind_speed),
+      }))
+      .filter((entry) => entry.datetime && Number.isFinite(entry.temperature));
+  }
+
+  extractForecastEntries(payload, entityId) {
+    if (Array.isArray(payload)) {
+      return this.normalizeForecastEntries(payload);
+    }
+
+    if (!payload || typeof payload !== "object") {
+      return [];
+    }
+
+    if (Array.isArray(payload.forecast)) {
+      return this.normalizeForecastEntries(payload.forecast);
+    }
+
+    if (entityId && Array.isArray(payload?.[entityId]?.forecast)) {
+      return this.normalizeForecastEntries(payload[entityId].forecast);
+    }
+
+    return [];
+  }
+
+  setOutsideForecast(entityId, payload) {
+    const forecast = this.extractForecastEntries(payload, entityId);
+    this._outsideForecastEntityId = entityId;
+    this._outsideForecast = forecast;
+    this.scheduleRender();
+  }
+
+  async requestOutsideForecast(entityId, requestId) {
+    const wsCandidates = [
+      { type: "weather/subscribe_forecast", forecast_type: "hourly", entity_id: entityId, subscribe: true },
+      { type: "weather/forecast", forecast_type: "hourly", entity_id: entityId },
+      { type: "weather/get_forecast", forecast_type: "hourly", entity_id: entityId },
+      { type: "weather/get_forecasts", forecast_type: "hourly", entity_id: entityId },
+    ];
+
+    const connection = this._hass?.connection;
+    const callWS = this._hass?.callWS?.bind(this._hass);
+
+    for (const candidate of wsCandidates) {
+      try {
+        if (candidate.subscribe && connection?.subscribeMessage) {
+          const unsubscribe = await connection.subscribeMessage(
+            (message) => {
+              if (requestId !== this._outsideForecastRequestId || this.config?.outside_weather !== entityId) return;
+              this.setOutsideForecast(entityId, message);
+            },
+            candidate
+          );
+
+          if (requestId !== this._outsideForecastRequestId || this.config?.outside_weather !== entityId) {
+            if (typeof unsubscribe === "function") {
+              unsubscribe();
+            }
+            return false;
+          }
+
+          this._outsideForecastUnsubscribe = unsubscribe;
+          return true;
+        }
+
+        if (callWS) {
+          const result = await callWS(candidate);
+          if (requestId !== this._outsideForecastRequestId || this.config?.outside_weather !== entityId) {
+            return false;
+          }
+
+          const forecast = this.extractForecastEntries(result, entityId);
+          if (forecast.length) {
+            this._outsideForecastEntityId = entityId;
+            this._outsideForecast = forecast;
+            this.scheduleRender();
+            return true;
+          }
+        }
+      } catch (_error) {
+        // Try the next Home Assistant forecast API variant.
+      }
+    }
+
+    return false;
+  }
+
+  ensureOutsideForecast() {
+    const entityId = this.config?.outside_weather;
+    if (!entityId) {
+      this.clearOutsideForecastSubscription();
+      this._outsideForecast = [];
+      this._outsideForecastEntityId = null;
+      return;
+    }
+
+    if (this._outsideForecastEntityId === entityId && (this._outsideForecast.length || this._outsideForecastUnsubscribe)) {
+      return;
+    }
+
+    this.clearOutsideForecastSubscription();
+    this._outsideForecast = [];
+    this._outsideForecastEntityId = entityId;
+
+    const stateForecast = this.extractForecastEntries(this.getAttributes(entityId), entityId);
+    if (stateForecast.length) {
+      this._outsideForecast = stateForecast;
+    }
+
+    if (Date.now() - this._outsideForecastLastRequestAt < 15000) {
+      return;
+    }
+
+    this._outsideForecastLastRequestAt = Date.now();
+    const requestId = this._outsideForecastRequestId;
+    this.requestOutsideForecast(entityId, requestId);
+  }
+
   getOutsideForecast() {
     const entityId = this.config?.outside_weather;
     if (!entityId) return [];
 
-    const attrs = this.getAttributes(entityId);
-    const forecast = Array.isArray(attrs.forecast) ? attrs.forecast : [];
+    if (this._outsideForecastEntityId === entityId && this._outsideForecast.length) {
+      return this._outsideForecast;
+    }
 
-    return forecast
-      .map((entry) => ({
-        datetime: entry.datetime || entry.datetime_iso || entry.time || null,
-        temperature: Number(entry.temperature),
-      }))
-      .filter((entry) => entry.datetime && Number.isFinite(entry.temperature));
+    return this.extractForecastEntries(this.getAttributes(entityId), entityId);
   }
 
   formatForecastTime(datetimeValue) {
@@ -130,7 +272,9 @@ class RoomClimateCard extends HTMLElement {
 
     const coolingWindow = this.getNextCoolingWindow(room);
     if (!coolingWindow.timeText) {
-      return null;
+      return `🕒 Nächstes Lüftungsfenster: sobald die Außentemperatur unter ${coolingWindow.threshold
+        .toFixed(1)
+        .replace(".", ",")} °C fällt.`;
     }
 
     return `🕒 Nächstes Lüftungsfenster: ab ${coolingWindow.timeText} Uhr, wenn die Außentemperatur unter ${coolingWindow.threshold
