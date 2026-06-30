@@ -135,9 +135,9 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         domain, service = service_name.split(".", 1)
         title = f"Raumklima: {room.name}"
         message_map = {
-            NOTIFICATION_VENTILATE: f"Lueften lohnt sich jetzt. {room.recommendation}",
-            NOTIFICATION_CLOSE_WINDOW: "Fenster wieder schliessen. Die aktuelle Aussenluft bringt keinen Vorteil mehr.",
-            NOTIFICATION_CLOSE_COVER: "Rollladen schliessen empfohlen. Direkter Sonneneintrag heizt den Raum aktuell weiter auf.",
+            NOTIFICATION_VENTILATE: f"Lüften lohnt sich jetzt. {room.recommendation}",
+            NOTIFICATION_CLOSE_WINDOW: "Fenster wieder schließen. Die aktuelle Außenluft bringt keinen Vorteil mehr.",
+            NOTIFICATION_CLOSE_COVER: "Rollladen schließen empfohlen. Direkter Sonneneintrag heizt den Raum aktuell weiter auf.",
         }
         message = message_map[notification_type]
 

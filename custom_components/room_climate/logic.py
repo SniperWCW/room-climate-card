@@ -460,7 +460,7 @@ def evaluate_room(
         recommendation_parts.append(f"Abkühlung: {cooling_text}")
     recommendation = " | ".join(recommendation_parts) if recommendation_parts else "Keine Fenstersensor-Empfehlung verfügbar"
 
-    ventilate_now = bool(dehumidify_beneficial or cooling_beneficial)
+    ventilate_now = bool((dehumidify_beneficial or cooling_beneficial) and not window_open)
     close_window = bool(window_open and not ventilate_now)
     close_cover = bool(
         room.get(CONF_COVER)
