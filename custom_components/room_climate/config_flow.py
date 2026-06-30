@@ -271,6 +271,19 @@ def _next_detected_room_defaults(hass, configured_rooms: list[dict[str, Any]]) -
     return {}
 
 
+def _available_detected_rooms(hass, configured_rooms: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    configured_ids = {room.get(CONF_ROOM_ID) for room in configured_rooms}
+    configured_names = {room.get(CONF_ROOM_NAME) for room in configured_rooms}
+    available: list[dict[str, Any]] = []
+    for room in _detect_rooms(hass):
+        room_name = room.get(CONF_ROOM_NAME, "")
+        room_slug = slugify(room_name)
+        if room_slug in configured_ids or room_name in configured_names:
+            continue
+        available.append(room)
+    return available
+
+
 def _notify_service_options(hass) -> list[selector.SelectOptionDict]:
     services = hass.services.async_services().get("notify", {})
     options = [selector.SelectOptionDict(value="", label="Keine Push-Benachrichtigung")]
@@ -403,6 +416,8 @@ class RoomClimateOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         options = ["global", "add_room"]
+        if _available_detected_rooms(self.hass, self.rooms):
+            options.insert(1, "import_detected_rooms")
         if self.rooms:
             options.extend(["edit_room_select", "remove_room"])
         return self.async_show_menu(step_id="init", menu_options=options)
@@ -437,6 +452,50 @@ class RoomClimateOptionsFlow(config_entries.OptionsFlow):
             return self._store({CONF_ROOMS: rooms})
         defaults = _next_detected_room_defaults(self.hass, self.rooms)
         return self.async_show_form(step_id="add_room", data_schema=_room_schema(defaults))
+
+    async def async_step_import_detected_rooms(self, user_input: dict[str, Any] | None = None):
+        detected_rooms = _available_detected_rooms(self.hass, self.rooms)
+        room_options = [
+            selector.SelectOptionDict(
+                value=slugify(room.get(CONF_ROOM_NAME, "")),
+                label=room.get(CONF_ROOM_NAME, "Raum"),
+            )
+            for room in detected_rooms
+        ]
+
+        if user_input is not None:
+            selected_ids = set(user_input.get("selected_rooms", []))
+            rooms = self.rooms
+            existing_ids = {room[CONF_ROOM_ID] for room in rooms}
+
+            for detected_room in detected_rooms:
+                base_id = slugify(detected_room.get(CONF_ROOM_NAME, "room"))
+                if base_id not in selected_ids:
+                    continue
+
+                room_id = base_id
+                counter = 2
+                while room_id in existing_ids:
+                    room_id = f"{base_id}_{counter}"
+                    counter += 1
+
+                rooms.append({CONF_ROOM_ID: room_id, **detected_room})
+                existing_ids.add(room_id)
+
+            return self._store({CONF_ROOMS: rooms})
+
+        schema = vol.Schema(
+            {
+                vol.Required("selected_rooms", default=[option["value"] for option in room_options]): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=room_options,
+                        multiple=True,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                )
+            }
+        )
+        return self.async_show_form(step_id="import_detected_rooms", data_schema=schema)
 
     async def async_step_edit_room_select(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:

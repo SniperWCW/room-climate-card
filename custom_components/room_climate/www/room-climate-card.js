@@ -14,14 +14,10 @@ class RoomClimateCard extends HTMLElement {
   }
 
   static getStubConfig(hass) {
-    const rooms = RoomClimateCardEditor.detectRooms(hass);
     return {
       mode: "detailed",
       columns: 2,
-      outside_absolute_humidity: RoomClimateCardEditor.findGlobalOutsideHumidity(hass),
-      outside_weather: RoomClimateCardEditor.findGlobalWeatherEntity(hass),
-      sun_entity: RoomClimateCardEditor.findGlobalSunEntity(hass),
-      rooms: rooms.length ? rooms : [RoomClimateCardEditor.createEmptyRoom()],
+      room_entities: [],
     };
   }
 
@@ -32,6 +28,7 @@ class RoomClimateCard extends HTMLElement {
       outside_absolute_humidity: "",
       outside_weather: "",
       sun_entity: "",
+      room_entities: [],
       rooms: [],
       ...config,
     };
@@ -55,6 +52,90 @@ class RoomClimateCard extends HTMLElement {
     requestAnimationFrame(() => {
       this._renderScheduled = false;
       this.render();
+    });
+  }
+
+  isLegacyConfig() {
+    return Array.isArray(this.config?.rooms) && this.config.rooms.length > 0;
+  }
+
+  getManagedScoreEntities() {
+    const states = Object.entries(this._hass?.states || {});
+    const selectedEntities = Array.isArray(this.config?.room_entities) ? this.config.room_entities.filter(Boolean) : [];
+    const selectedSet = new Set(selectedEntities);
+
+    const entities = states
+      .filter(([entityId, stateObj]) => {
+        if (!entityId.startsWith("sensor.") || !entityId.endsWith("_score")) return false;
+        const attrs = stateObj?.attributes || {};
+        return Boolean(attrs.room_type && attrs.description && attrs.recommendation);
+      })
+      .sort(([, a], [, b]) => {
+        const nameA = String(a?.attributes?.friendly_name || a?.entity_id || "");
+        const nameB = String(b?.attributes?.friendly_name || b?.entity_id || "");
+        return nameA.localeCompare(nameB, "de");
+      });
+
+    if (!selectedSet.size) {
+      return entities;
+    }
+
+    return entities.filter(([entityId]) => selectedSet.has(entityId));
+  }
+
+  getManagedRoomName(entityId, stateObj) {
+    const friendlyName = String(stateObj?.attributes?.friendly_name || "").trim();
+    if (friendlyName) {
+      return friendlyName.replace(/\s+score$/i, "").trim();
+    }
+
+    const objectId = entityId.split(".")[1] || "";
+    return objectId
+      .replace(/_score$/i, "")
+      .split("_")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  }
+
+  getManagedRooms() {
+    return this.getManagedScoreEntities().map(([entityId, stateObj]) => {
+      const attrs = stateObj?.attributes || {};
+      const score = Number(stateObj?.state);
+      const roomType = attrs.room_type || "default";
+      const temperature = Number(attrs.temperature);
+      const humidity = Number(attrs.humidity);
+      const humidexValue = Number(attrs.humidex);
+      const level = this.getDisplayLevel(
+        Number.isFinite(score) ? score : 0,
+        Number.isFinite(temperature) ? temperature : null,
+        Number.isFinite(humidexValue) ? humidexValue : null,
+        attrs.simmer_felt ?? null
+      );
+      const profile = this.getRoomProfile({ room_type: roomType });
+      const windowKnown = typeof attrs.window_open === "boolean";
+      const windowText = windowKnown ? (attrs.window_open ? "offen" : "geschlossen") : "kein Sensor";
+
+      return {
+        entityId,
+        name: this.getManagedRoomName(entityId, stateObj),
+        score: Number.isFinite(score) ? score : 0,
+        level,
+        description: attrs.description || "Keine Beschreibung verfuegbar",
+        dehumidifyAdvice: attrs.dehumidify_advice || "",
+        coolingAdvice: attrs.cooling_advice || "",
+        recommendation: attrs.recommendation || "",
+        nextWindow: attrs.next_ventilation_window || "",
+        temperature: Number.isFinite(temperature) ? temperature : null,
+        humidity: Number.isFinite(humidity) ? humidity : null,
+        humidexValue: Number.isFinite(humidexValue) ? humidexValue : null,
+        simmerText: this.getSimmerText(attrs.simmer_felt ?? null),
+        orientationLabel: attrs.window_orientation || null,
+        solarExposure: attrs.solar_exposure || "kein relevanter Sonneneintrag",
+        windowText,
+        roomType,
+        profile,
+      };
     });
   }
 
@@ -1070,8 +1151,132 @@ class RoomClimateCard extends HTMLElement {
     `;
   }
 
+  managedRoomHtml(room) {
+    const ventilationClass =
+      room.dehumidifyAdvice || room.coolingAdvice
+        ? room.dehumidifyAdvice.includes("offen") || room.coolingAdvice.includes("offen")
+          ? "vent-open"
+          : room.dehumidifyAdvice.includes("sinnvoll")
+            ? "vent-recommended"
+            : "vent-none"
+        : "vent-none";
+
+    if (this.config.mode === "compact") {
+      return `
+        <div class="room ${room.level.cls} ${ventilationClass}">
+          <div class="top">
+            <div>
+              <div class="name">${room.level.icon} ${room.name}</div>
+              <div class="sub">${room.level.label}</div>
+            </div>
+            <div class="score">${room.score}</div>
+          </div>
+          <div class="metrics">
+            <span>Temperatur ${room.temperature?.toFixed(1) ?? "-"} C</span>
+            <span>Luftfeuchtigkeit ${room.humidity?.toFixed(0) ?? "-"} %</span>
+            ${room.dehumidifyAdvice ? `<span>Entfeuchtung ${room.dehumidifyAdvice}</span>` : ""}
+            ${room.coolingAdvice ? `<span>Abkuehlung ${room.coolingAdvice}</span>` : ""}
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="room ${room.level.cls} ${ventilationClass}">
+        <div class="top">
+          <div>
+            <div class="name">${room.level.icon} ${room.name}</div>
+            <div class="sub">Raumklima: ${room.score}/100 · ${room.level.label}</div>
+          </div>
+          <div class="score">${room.score}</div>
+        </div>
+
+        <div class="text">${room.description}</div>
+
+        ${(room.dehumidifyAdvice || room.coolingAdvice) ? `
+          <div class="ventilation-box">
+            ${room.dehumidifyAdvice ? `<div><b>Entfeuchtung:</b> ${room.dehumidifyAdvice}</div>` : ""}
+            ${room.coolingAdvice ? `<div><b>Abkuehlung:</b> ${room.coolingAdvice}</div>` : ""}
+            ${room.nextWindow ? `<div class="next-window"><b>${room.nextWindow}</b></div>` : ""}
+          </div>
+        ` : ""}
+
+        <div class="details">
+          <div><b>Temperatur:</b> ${room.temperature?.toFixed(1) ?? "-"} C</div>
+          <div><b>Luftfeuchtigkeit:</b> ${room.humidity?.toFixed(0) ?? "-"} %</div>
+          <div><b>Zielbereich:</b> ${room.profile.humidityMin}–${room.profile.humidityMax} % · ${room.profile.tempMin}–${room.profile.tempMax} C</div>
+          <div><b>Humidex:</b> ${room.humidexValue?.toFixed(1) ?? "-"}</div>
+          <div><b>Sommer Simmer:</b> ${room.simmerText}</div>
+          ${room.orientationLabel ? `<div><b>Fensterlage:</b> ${room.orientationLabel} · ${room.solarExposure}</div>` : ""}
+          <div><b>Fenster:</b> ${room.windowText}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  managedGroupedHtml() {
+    const groups = {};
+
+    this.getManagedRooms().forEach((room) => {
+      const key = `${room.level.icon} ${room.level.label}`;
+      groups[key] ??= [];
+      groups[key].push(room);
+    });
+
+    return `
+      <ha-card>
+        <div class="content">
+          <div class="title">Raumklima</div>
+          ${Object.entries(groups)
+            .map(
+              ([label, rooms]) => `
+                <div class="group">
+                  <div class="group-title">${label}</div>
+                  ${rooms
+                    .map(
+                      (room) => `
+                        <div class="group-row">
+                          <span>${room.name}</span>
+                          <span>${room.recommendation || "Keine Empfehlung"}</span>
+                          <b>${room.score}/100</b>
+                        </div>
+                      `
+                    )
+                    .join("")}
+                </div>
+              `
+            )
+            .join("")}
+        </div>
+        ${this.styles()}
+      </ha-card>
+    `;
+  }
+
   render() {
     if (!this._hass || !this.config) return;
+
+    if (!this.isLegacyConfig()) {
+      const rooms = this.getManagedRooms();
+
+      if (this.config.mode === "grouped") {
+        this.innerHTML = this.managedGroupedHtml();
+        return;
+      }
+
+      this.innerHTML = `
+        <ha-card>
+          <div class="content">
+            <div class="title">Raumklima</div>
+            <div class="grid" style="grid-template-columns: repeat(${this.config.columns}, minmax(0, 1fr));">
+              ${rooms.map((room) => this.managedRoomHtml(room)).join("")}
+            </div>
+          </div>
+          ${this.styles()}
+        </ha-card>
+      `;
+      return;
+    }
 
     if (this.config.mode === "grouped") {
       this.innerHTML = this.groupedHtml();
@@ -1203,6 +1408,14 @@ class RoomClimateCardEditor extends HTMLElement {
       dewpoint: "",
       window: "",
       window_orientation: "",
+    };
+  }
+
+  static createIntegrationConfig() {
+    return {
+      mode: "detailed",
+      columns: 2,
+      room_entities: [],
     };
   }
 
@@ -1405,16 +1618,11 @@ class RoomClimateCardEditor extends HTMLElement {
     const hadConfig = Boolean(this.config);
 
     this.config = {
-      mode: "detailed",
-      columns: 2,
-      outside_absolute_humidity: "",
-      outside_weather: "",
-      sun_entity: "",
-      rooms: [],
+      ...RoomClimateCardEditor.createIntegrationConfig(),
       ...config,
     };
 
-    if (!Array.isArray(this.config.rooms) || this.config.rooms.length === 0) {
+    if (this.isLegacyConfig() && (!Array.isArray(this.config.rooms) || this.config.rooms.length === 0)) {
       this.config.rooms = [RoomClimateCardEditor.createEmptyRoom()];
     }
 
@@ -1446,6 +1654,48 @@ class RoomClimateCardEditor extends HTMLElement {
       this._renderScheduled = false;
       this.render();
     });
+  }
+
+  isLegacyConfig() {
+    return Array.isArray(this.config?.rooms) && this.config.rooms.length > 0;
+  }
+
+  getManagedScoreChoices() {
+    return Object.entries(this._hass?.states || {})
+      .filter(([entityId, stateObj]) => {
+        if (!entityId.startsWith("sensor.") || !entityId.endsWith("_score")) return false;
+        const attrs = stateObj?.attributes || {};
+        return Boolean(attrs.room_type && attrs.description && attrs.recommendation);
+      })
+      .sort(([, a], [, b]) => {
+        const nameA = String(a?.attributes?.friendly_name || "");
+        const nameB = String(b?.attributes?.friendly_name || "");
+        return nameA.localeCompare(nameB, "de");
+      })
+      .map(([entityId, stateObj]) => ({
+        entityId,
+        label: String(stateObj?.attributes?.friendly_name || entityId).replace(/\s+score$/i, "").trim(),
+      }));
+  }
+
+  toggleManagedRoom(entityId, enabled) {
+    const currentSelection = Array.isArray(this.config.room_entities) ? this.config.room_entities : [];
+    const selected = new Set(
+      currentSelection.length ? currentSelection : this.getManagedScoreChoices().map((room) => room.entityId)
+    );
+    if (enabled) {
+      selected.add(entityId);
+    } else {
+      selected.delete(entityId);
+    }
+
+    this.config = {
+      ...this.config,
+      room_entities: [...selected],
+    };
+
+    this.fireConfigChanged();
+    this.render();
   }
 
   captureScrollPosition() {
@@ -1615,6 +1865,120 @@ class RoomClimateCardEditor extends HTMLElement {
 
   render() {
     if (!this._hass || !this.config) return;
+
+    if (!this.isLegacyConfig()) {
+      const roomChoices = this.getManagedScoreChoices();
+      const selected = new Set(Array.isArray(this.config.room_entities) ? this.config.room_entities : []);
+
+      this.innerHTML = `
+        <div class="editor">
+          <label>Darstellung</label>
+          <select id="mode">
+            <option value="detailed" ${this.config.mode === "detailed" ? "selected" : ""}>Detailliert</option>
+            <option value="compact" ${this.config.mode === "compact" ? "selected" : ""}>Kompakt</option>
+            <option value="grouped" ${this.config.mode === "grouped" ? "selected" : ""}>Gruppiert</option>
+          </select>
+
+          <label>Spalten</label>
+          <select id="columns">
+            <option value="1" ${this.config.columns == 1 ? "selected" : ""}>1</option>
+            <option value="2" ${this.config.columns == 2 ? "selected" : ""}>2</option>
+            <option value="3" ${this.config.columns == 3 ? "selected" : ""}>3</option>
+          </select>
+
+          <div class="entity-help integration-help">
+            <div><b>Integration-Modus</b></div>
+            <div>Die Karte verwendet automatisch die in der Room-Climate-Integration angelegten Raeume und Entitaeten.</div>
+            <div>Bestehende alte YAML-Karten mit manueller Sensor-Auswahl funktionieren weiterhin unveraendert.</div>
+          </div>
+
+          <h3>Raeume</h3>
+          <div class="managed-room-list">
+            ${roomChoices.length
+              ? roomChoices
+                  .map(
+                    (room) => `
+                      <label class="managed-room-option">
+                        <input type="checkbox" data-room-entity="${this.escapeHtml(room.entityId)}" ${selected.size === 0 || selected.has(room.entityId) ? "checked" : ""}>
+                        <span>${this.escapeHtml(room.label)}</span>
+                      </label>
+                    `
+                  )
+                  .join("")
+              : `<div class="entity-help integration-help">Noch keine Room-Climate-Score-Sensoren gefunden. Richte zuerst die Integration und mindestens einen Raum ein.</div>`}
+          </div>
+        </div>
+
+        <style>
+          .editor {
+            display: grid;
+            gap: 10px;
+            padding: 8px 0;
+          }
+
+          label,
+          h3 {
+            font-weight: 600;
+          }
+
+          select,
+          input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 8px;
+            border-radius: 8px;
+            border: 1px solid var(--divider-color);
+            background: var(--card-background-color);
+            color: var(--primary-text-color);
+          }
+
+          .entity-help {
+            border: 1px solid var(--divider-color);
+            border-radius: 12px;
+            padding: 10px 12px;
+            background: rgba(127, 127, 127, 0.06);
+            display: grid;
+            gap: 6px;
+          }
+
+          .managed-room-list {
+            display: grid;
+            gap: 8px;
+          }
+
+          .managed-room-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border: 1px solid var(--divider-color);
+            border-radius: 12px;
+            padding: 10px 12px;
+            background: rgba(127, 127, 127, 0.04);
+          }
+
+          .managed-room-option input {
+            width: auto;
+            margin: 0;
+          }
+        </style>
+      `;
+
+      this.querySelector("#mode")?.addEventListener("change", (e) => {
+        this.updateRoot("mode", e.target.value);
+      });
+
+      this.querySelector("#columns")?.addEventListener("change", (e) => {
+        this.updateRoot("columns", Number(e.target.value));
+      });
+
+      this.querySelectorAll("input[data-room-entity]").forEach((input) => {
+        input.addEventListener("change", (e) => {
+          this.toggleManagedRoom(e.currentTarget.dataset.roomEntity, e.currentTarget.checked);
+        });
+      });
+
+      return;
+    }
 
     const rooms = this.config.rooms?.length ? this.config.rooms : [RoomClimateCardEditor.createEmptyRoom()];
 

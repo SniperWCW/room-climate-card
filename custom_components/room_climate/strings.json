@@ -20,6 +20,9 @@
       "global": {
         "title": "Globale Einstellungen"
       },
+      "import_detected_rooms": {
+        "title": "Raeume aus Home Assistant auswaehlen"
+      },
       "add_room": {
         "title": "Raum hinzufuegen"
       },
