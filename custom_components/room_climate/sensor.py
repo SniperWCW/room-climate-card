@@ -67,6 +67,8 @@ class RoomClimateScoreSensor(RoomClimateBaseSensor):
         attrs["room_id"] = self.room.room_id
         attrs["room_name"] = self.room.name
         attrs["level"] = self.room.level_label
+        attrs["level_icon"] = self.room.level_icon
+        attrs["level_class"] = self.room.level_class
         attrs["description"] = self.room.description
         attrs["recommendation"] = self.room.recommendation
         return attrs

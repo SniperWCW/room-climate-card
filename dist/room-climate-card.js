@@ -119,15 +119,14 @@ class RoomClimateCard extends HTMLElement {
       const temperature = Number(attrs.temperature);
       const humidity = Number(attrs.humidity);
       const humidexValue = Number(attrs.humidex);
-      const level = this.getDisplayLevel(
-        Number.isFinite(score) ? score : 0,
-        Number.isFinite(temperature) ? temperature : null,
-        Number.isFinite(humidexValue) ? humidexValue : null,
-        attrs.simmer_felt ?? null
-      );
       const profile = this.getRoomProfile({ room_type: roomType });
       const windowKnown = typeof attrs.window_open === "boolean";
       const windowText = windowKnown ? (attrs.window_open ? "offen" : "geschlossen") : "kein Sensor";
+      const level = {
+        label: attrs.level || "Unbekannt",
+        icon: attrs.level_icon || "ℹ️",
+        cls: attrs.level_class ? `rc-${attrs.level_class}` : "rc-medium",
+      };
 
       return {
         entityId,
@@ -1188,7 +1187,7 @@ class RoomClimateCard extends HTMLElement {
             <span>Temperatur ${room.temperature?.toFixed(1) ?? "-"} C</span>
             <span>Luftfeuchtigkeit ${room.humidity?.toFixed(0) ?? "-"} %</span>
             ${room.dehumidifyAdvice ? `<span>Entfeuchtung ${room.dehumidifyAdvice}</span>` : ""}
-            ${room.coolingAdvice ? `<span>Abkuehlung ${room.coolingAdvice}</span>` : ""}
+            ${room.coolingAdvice ? `<span>Abkühlung ${room.coolingAdvice}</span>` : ""}
           </div>
         </div>
       `;
@@ -1209,7 +1208,7 @@ class RoomClimateCard extends HTMLElement {
         ${(room.dehumidifyAdvice || room.coolingAdvice) ? `
           <div class="ventilation-box">
             ${room.dehumidifyAdvice ? `<div><b>Entfeuchtung:</b> ${room.dehumidifyAdvice}</div>` : ""}
-            ${room.coolingAdvice ? `<div><b>Abkuehlung:</b> ${room.coolingAdvice}</div>` : ""}
+            ${room.coolingAdvice ? `<div><b>Abkühlung:</b> ${room.coolingAdvice}</div>` : ""}
             ${room.nextWindow ? `<div class="next-window"><b>${room.nextWindow}</b></div>` : ""}
           </div>
         ` : ""}

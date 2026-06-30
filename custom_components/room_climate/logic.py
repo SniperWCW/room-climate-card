@@ -174,10 +174,6 @@ def get_cooling_duration(cooling_delta: float, wind_speed: float | None) -> int:
 
 
 def get_display_level(score: int, temp: float | None, humidex_value: float | None, simmer: str | None) -> dict[str, str]:
-    if (temp is not None and temp >= 30) or (humidex_value is not None and humidex_value >= 38) or simmer in {"danger_of_heatstroke", "extreme_danger_of_heatstroke", "circulatory_collapse_imminent"}:
-        return {"label": "Hitzekritisch", "cls": "critical", "icon": "🆘"}
-    if (temp is not None and temp >= 28) or (humidex_value is not None and humidex_value >= 34) or simmer in {"extremely_warm", "increasing_discomfort"}:
-        return {"label": "Stark waermebelastet", "cls": "bad", "icon": "🔴"}
     if score >= 90:
         return {"label": "Ideal", "cls": "excellent", "icon": "🌿"}
     if score >= 75:
@@ -201,11 +197,11 @@ def get_description(room: dict[str, Any], score: int, temp: float | None, dew_te
     if score >= 60:
         return f"Im {name} ist es aktuell {temp_text}. Zusammen mit der {dew_text}en Luft wirkt das Raumklima bereits leicht belastend."
     if score >= 45:
-        return f"Im {name} ist das Raumklima spuerbar belastend. Es ist {temp_text}, die Luft wirkt {dew_text} und der Humidex ist {humidex_text}."
+        return f"Im {name} ist das Raumklima spürbar belastend. Es ist {temp_text}, die Luft wirkt {dew_text} und der Humidex ist {humidex_text}."
     if score >= 30:
-        return f"Im {name} ist es aktuell {temp_text}. Das Raumklima wirkt bereits leicht waermebelastet, auch wenn die Luft {dew_text} erscheint."
+        return f"Im {name} ist es aktuell {temp_text}. Das Raumklima wirkt bereits leicht wärmebelastet, auch wenn die Luft {dew_text} erscheint."
     if temp is not None and humidex_value is not None:
-        return f"Im {name} ist es mit {temp:.1f} °C sehr warm. Das Raumklima ist trotz {dew_text}er Luft spuerbar belastend."
+        return f"Im {name} ist es mit {temp:.1f} °C sehr warm. Das Raumklima ist trotz {dew_text}er Luft spürbar belastend."
     return f"Im {name} herrscht aktuell ein kritisches Raumklima."
 
 
@@ -214,19 +210,19 @@ def get_dew_text(value: str | None) -> str:
         "dry": "trocken",
         "very_comfortable": "sehr angenehm",
         "comfortable": "angenehm",
-        "ok_but_humid": "leicht schwuel",
-        "somewhat_uncomfortable": "schwuel",
-        "quite_uncomfortable": "deutlich schwuel",
-        "extremely_uncomfortable": "sehr schwuel",
-        "severely_high": "extrem schwuel",
+        "ok_but_humid": "leicht schwül",
+        "somewhat_uncomfortable": "schwül",
+        "quite_uncomfortable": "deutlich schwül",
+        "extremely_uncomfortable": "sehr schwül",
+        "severely_high": "extrem schwül",
     }
-    return mapping.get(value or "", "unauffaellig")
+    return mapping.get(value or "", "unauffällig")
 
 
 def get_humidex_text(value: str | None) -> str:
     mapping = {
         "comfortable": "angenehm",
-        "noticeable_discomfort": "spuerbar",
+        "noticeable_discomfort": "spürbar",
         "evident_discomfort": "deutlich",
         "great_discomfort": "hoch",
         "dangerous_discomfort": "kritisch",
@@ -237,15 +233,15 @@ def get_humidex_text(value: str | None) -> str:
 
 def get_simmer_text(value: str | None) -> str:
     mapping = {
-        "cool": "kuehl",
-        "slightly_cool": "leicht kuehl",
+        "cool": "kühl",
+        "slightly_cool": "leicht kühl",
         "comfortable": "angenehm",
         "slightly_warm": "leicht warm",
         "increasing_discomfort": "zunehmend belastend",
         "extremely_warm": "sehr warm",
         "danger_of_heatstroke": "Hitzeschlaggefahr",
         "extreme_danger_of_heatstroke": "akute Hitzeschlaggefahr",
-        "circulatory_collapse_imminent": "Kreislaufkollaps moeglich",
+        "circulatory_collapse_imminent": "Kreislaufkollaps möglich",
     }
     return mapping.get(value or "", "unbekannt")
 
@@ -314,6 +310,7 @@ class RoomResult:
     score: int
     level_label: str
     level_icon: str
+    level_class: str
     description: str
     recommendation: str
     next_window: str | None
@@ -378,16 +375,16 @@ def evaluate_room(
             dehumidify_text = "Fenster ist bereits offen"
             dehumidify_level = "open"
         elif inside_rel is None:
-            dehumidify_text = "Luftfeuchtigkeit nicht verfuegbar"
+            dehumidify_text = "Luftfeuchtigkeit nicht verfügbar"
             dehumidify_level = "unknown"
         elif humidity_too_dry:
             dehumidify_text = f"Luft zu trocken ({inside_rel:.0f} %)"
             dehumidify_level = "dry"
         elif inside_abs is None or outside_abs is None:
             dehumidify_text = (
-                "Raum ist feucht, aber ohne Innen-/Aussenvergleich keine sichere Entfeuchtungsaussage"
+                "Raum ist feucht, aber ohne Innen-/Außenvergleich keine sichere Entfeuchtungsaussage"
                 if humidity_very_high
-                else "Fenster geschlossen halten. Fuer Entfeuchtung fehlt aktuell ein belastbarer Aussenvergleich."
+                else "Fenster geschlossen halten. Für Entfeuchtung fehlt aktuell ein belastbarer Außenvergleich."
             )
             dehumidify_level = "observe" if humidity_very_high else "neutral"
         else:
@@ -399,13 +396,13 @@ def evaluate_room(
                 dehumidify_text = f"Leichtes Entfeuchten sinnvoll, ca. {duration} Min."
                 dehumidify_level = "short"
             elif humidity_high and diff is not None and diff <= 0.3:
-                dehumidify_text = "Nicht sinnvoll - aussen kaum trockener"
+                dehumidify_text = "Nicht sinnvoll - außen kaum trockener"
                 dehumidify_level = "avoid"
             elif humidity_high:
-                dehumidify_text = "Feuchte erhoeht, aber aktuell kein klarer Entfeuchtungsvorteil"
+                dehumidify_text = "Feuchte erhöht, aber aktuell kein klarer Entfeuchtungsvorteil"
                 dehumidify_level = "observe"
             else:
-                dehumidify_text = "Fenster geschlossen halten. Eine Entfeuchtung durch Lueften ist aktuell nicht noetig."
+                dehumidify_text = "Fenster geschlossen halten. Eine Entfeuchtung durch Lüften ist aktuell nicht nötig."
                 dehumidify_level = "neutral"
 
     cooling_text = None
@@ -415,39 +412,39 @@ def evaluate_room(
             cooling_text = "Fenster ist bereits offen"
             cooling_level = "open"
         elif inside_temp is None or outside_temp is None or cooling_delta is None:
-            cooling_text = "Fenster geschlossen halten. Fuer Abkuehlung fehlt aktuell ein belastbarer Aussenvergleich."
+            cooling_text = "Fenster geschlossen halten. Für Abkühlung fehlt aktuell ein belastbarer Außenvergleich."
             cooling_level = "neutral"
         elif not can_cool:
             sun_text = (
-                " Zusaetzlicher Sonneneintrag spricht aktuell ebenfalls gegen Lueften."
+                " Zusätzlicher Sonneneintrag spricht aktuell ebenfalls gegen Lüften."
                 if solar_exposure["level"] == "direct"
-                else " Leichter Sonneneintrag bremst die Abkuehlung zusaetzlich."
+                else " Leichter Sonneneintrag bremst die Abkühlung zusätzlich."
                 if solar_exposure["level"] == "indirect"
                 else ""
             )
-            cooling_text = f"Fenster geschlossen halten. Aussenluft bringt derzeit keine nennenswerte Abkuehlung.{sun_text}"
+            cooling_text = f"Fenster geschlossen halten. Außenluft bringt derzeit keine nennenswerte Abkühlung.{sun_text}"
             cooling_level = "neutral"
         else:
             duration = get_cooling_duration(cooling_delta, outside_wind)
             if strong_cooling and (diff is None or diff > -1.0):
-                cooling_text = f"Fenster oeffnen. Abkuehlen ist jetzt sinnvoll, ca. {duration} Min."
+                cooling_text = f"Fenster öffnen. Abkühlen ist jetzt sinnvoll, ca. {duration} Min."
                 cooling_level = "cooling"
             elif diff is not None and diff <= -1.5:
-                cooling_text = f"Fenster nur kurz oeffnen. Abkuehlung ist moeglich, aber aussen ist es deutlich feuchter ({duration} Min.)."
+                cooling_text = f"Fenster nur kurz öffnen. Abkühlung ist möglich, aber außen ist es deutlich feuchter ({duration} Min.)."
                 cooling_level = "observe"
             else:
-                cooling_text = f"Fenster kurz oeffnen. Leichtes Abkuehlen ist sinnvoll, ca. {duration} Min."
+                cooling_text = f"Fenster kurz öffnen. Leichtes Abkühlen ist sinnvoll, ca. {duration} Min."
                 cooling_level = "cooling"
 
     next_window = None
     if room.get(CONF_WINDOW) and cooling_level not in {"cooling", "open"}:
         if cooling_window["time_text"]:
             next_window = (
-                f"ab {cooling_window['time_text']} Uhr, wenn die Aussentemperatur unter "
-                f"{cooling_window['threshold']:.1f} °C faellt."
+                f"ab {cooling_window['time_text']} Uhr, wenn die Außentemperatur unter "
+                f"{cooling_window['threshold']:.1f} °C fällt."
             )
         else:
-            next_window = f"sobald die Aussentemperatur unter {cooling_window['threshold']:.1f} °C faellt."
+            next_window = f"sobald die Außentemperatur unter {cooling_window['threshold']:.1f} °C fällt."
 
     score = calculate_score(room, metrics)
     humidex_value = metrics.get(CONF_HUMIDEX_VALUE)
@@ -460,8 +457,8 @@ def evaluate_room(
     if dehumidify_text:
         recommendation_parts.append(f"Entfeuchtung: {dehumidify_text}")
     if cooling_text:
-        recommendation_parts.append(f"Abkuehlung: {cooling_text}")
-    recommendation = " | ".join(recommendation_parts) if recommendation_parts else "Keine Fenstersensor-Empfehlung verfuegbar"
+        recommendation_parts.append(f"Abkühlung: {cooling_text}")
+    recommendation = " | ".join(recommendation_parts) if recommendation_parts else "Keine Fenstersensor-Empfehlung verfügbar"
 
     ventilate_now = bool(dehumidify_beneficial or cooling_beneficial)
     close_window = bool(window_open and not ventilate_now)
@@ -509,6 +506,7 @@ def evaluate_room(
         score=score,
         level_label=level["label"],
         level_icon=level["icon"],
+        level_class=level["cls"],
         description=description,
         recommendation=recommendation,
         next_window=next_window,
