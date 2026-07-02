@@ -17,6 +17,7 @@ class RoomClimateCard extends HTMLElement {
     return {
       mode: "detailed",
       columns: 2,
+      show_all_rooms: true,
       room_entities: [],
     };
   }
@@ -28,6 +29,7 @@ class RoomClimateCard extends HTMLElement {
       outside_absolute_humidity: "",
       outside_weather: "",
       sun_entity: "",
+      show_all_rooms: true,
       room_entities: [],
       rooms: [],
       ...config,
@@ -78,6 +80,7 @@ class RoomClimateCard extends HTMLElement {
 
   getManagedScoreEntities() {
     const states = Object.entries(this._hass?.states || {});
+    const showAllRooms = this.config?.show_all_rooms !== false;
     const selectedEntities = Array.isArray(this.config?.room_entities) ? this.config.room_entities.filter(Boolean) : [];
     const selectedSet = new Set(selectedEntities);
 
@@ -89,7 +92,7 @@ class RoomClimateCard extends HTMLElement {
         return nameA.localeCompare(nameB, "de");
       });
 
-    if (!selectedSet.size) {
+    if (showAllRooms || !selectedSet.size) {
       return entities;
     }
 
@@ -1699,7 +1702,19 @@ class RoomClimateCardEditor extends HTMLElement {
 
     this.config = {
       ...this.config,
+      show_all_rooms: false,
       room_entities: [...selected],
+    };
+
+    this.fireConfigChanged();
+    this.render();
+  }
+
+  toggleShowAllRooms(enabled) {
+    this.config = {
+      ...this.config,
+      show_all_rooms: enabled,
+      room_entities: enabled ? [] : (Array.isArray(this.config.room_entities) ? this.config.room_entities : []),
     };
 
     this.fireConfigChanged();
@@ -1876,6 +1891,7 @@ class RoomClimateCardEditor extends HTMLElement {
 
     if (!this.isLegacyConfig()) {
       const roomChoices = this.getManagedScoreChoices();
+      const showAllRooms = this.config.show_all_rooms !== false;
       const selected = new Set(Array.isArray(this.config.room_entities) ? this.config.room_entities : []);
 
       this.innerHTML = `
@@ -1901,13 +1917,17 @@ class RoomClimateCardEditor extends HTMLElement {
           </div>
 
           <h3>Raeume</h3>
+          <label class="managed-room-option managed-room-option--master">
+            <input type="checkbox" id="show-all-rooms" ${showAllRooms ? "checked" : ""}>
+            <span>Alle konfigurierten Räume anzeigen</span>
+          </label>
           <div class="managed-room-list">
             ${roomChoices.length
               ? roomChoices
                   .map(
                     (room) => `
                       <label class="managed-room-option">
-                        <input type="checkbox" data-room-entity="${this.escapeHtml(room.entityId)}" ${selected.size === 0 || selected.has(room.entityId) ? "checked" : ""}>
+                        <input type="checkbox" data-room-entity="${this.escapeHtml(room.entityId)}" ${showAllRooms || selected.has(room.entityId) ? "checked" : ""} ${showAllRooms ? "disabled" : ""}>
                         <span>${this.escapeHtml(room.label)}</span>
                       </label>
                     `
@@ -1968,6 +1988,10 @@ class RoomClimateCardEditor extends HTMLElement {
             width: auto;
             margin: 0;
           }
+
+          .managed-room-option--master {
+            background: rgba(127, 127, 127, 0.08);
+          }
         </style>
       `;
 
@@ -1977,6 +2001,10 @@ class RoomClimateCardEditor extends HTMLElement {
 
       this.querySelector("#columns")?.addEventListener("change", (e) => {
         this.updateRoot("columns", Number(e.target.value));
+      });
+
+      this.querySelector("#show-all-rooms")?.addEventListener("change", (e) => {
+        this.toggleShowAllRooms(e.target.checked);
       });
 
       this.querySelectorAll("input[data-room-entity]").forEach((input) => {
