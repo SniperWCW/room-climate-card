@@ -1430,6 +1430,7 @@ class RoomClimateCardEditor extends HTMLElement {
     return {
       mode: "detailed",
       columns: 2,
+      show_all_rooms: true,
       room_entities: [],
     };
   }
@@ -1673,6 +1674,23 @@ class RoomClimateCardEditor extends HTMLElement {
 
   isLegacyConfig() {
     return Array.isArray(this.config?.rooms) && this.config.rooms.length > 0;
+  }
+
+  isManagedScoreEntity(entityId, stateObj) {
+    if (!entityId.startsWith("sensor.") || !entityId.endsWith("_score")) return false;
+    const attrs = stateObj?.attributes || {};
+    if (attrs.managed_by === "room_climate") return true;
+
+    return Boolean(
+      attrs.room_type ||
+      attrs.room_id ||
+      attrs.room_name ||
+      attrs.description ||
+      attrs.recommendation ||
+      attrs.next_ventilation_window ||
+      attrs.solar_exposure ||
+      typeof attrs.window_open === "boolean"
+    );
   }
 
   getManagedScoreChoices() {
