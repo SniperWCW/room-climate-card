@@ -1,5 +1,7 @@
 # Room Climate
 
+![Room Climate banner](banner.png)
+
 Custom Home Assistant integration with bundled Lovelace card.
 
 Features:
