@@ -64,6 +64,8 @@ class RoomClimateFlagSensor(CoordinatorEntity[RoomClimateCoordinator], BinarySen
             "recommendation": self.room.recommendation,
             "next_ventilation_window": self.room.next_window,
             "description": self.room.description,
+            "close_window_reason": self.room.close_window_reason,
+            "close_cover_reason": self.room.close_cover_reason,
         }
 
     @property

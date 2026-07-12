@@ -316,7 +316,9 @@ class RoomResult:
     next_window: str | None
     ventilate_now: bool
     close_window: bool
+    close_window_reason: str | None
     close_cover: bool
+    close_cover_reason: str | None
     window_open: bool
     orientation_label: str | None
     solar_label: str
@@ -462,14 +464,23 @@ def evaluate_room(
 
     ventilate_now = bool((dehumidify_beneficial or cooling_beneficial) and not window_open)
     close_window = bool(window_open and not ventilate_now)
+    close_window_reason = (
+        "Fenster wieder schliessen. Die aktuelle Aussenluft bringt gerade keinen klaren Vorteil mehr."
+        if close_window
+        else None
+    )
+    cover_temp_threshold = max(profile["temp_max"] + 4, 24.5)
     close_cover = bool(
         room.get(CONF_COVER)
         and cover_state not in {"closed", "closing"}
         and solar_exposure["level"] == "direct"
         and inside_temp is not None
-        and inside_temp >= 25
-        and outside_temp is not None
-        and outside_temp >= 24
+        and inside_temp >= cover_temp_threshold
+    )
+    close_cover_reason = (
+        f"Rollladen schliessen. Direkter Sonneneintrag heizt den Raum bei {inside_temp:.1f} °C zusaetzlich auf."
+        if close_cover and inside_temp is not None
+        else None
     )
 
     attributes = {
@@ -488,6 +499,11 @@ def evaluate_room(
         "dehumidify_advice": dehumidify_text,
         "cooling_advice": cooling_text,
         "next_ventilation_window": next_window,
+        "ventilate_now": ventilate_now,
+        "close_window": close_window,
+        "close_window_reason": close_window_reason,
+        "close_cover": close_cover,
+        "close_cover_reason": close_cover_reason,
         "window_open": window_open,
         "window_orientation": orientation_label,
         "solar_exposure": solar_exposure["label"],
@@ -512,7 +528,9 @@ def evaluate_room(
         next_window=next_window,
         ventilate_now=ventilate_now,
         close_window=close_window,
+        close_window_reason=close_window_reason,
         close_cover=close_cover,
+        close_cover_reason=close_cover_reason,
         window_open=window_open,
         orientation_label=orientation_label,
         solar_label=solar_exposure["label"],

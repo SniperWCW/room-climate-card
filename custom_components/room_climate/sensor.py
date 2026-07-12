@@ -97,4 +97,9 @@ class RoomClimateRecommendationSensor(RoomClimateBaseSensor):
             "next_ventilation_window": self.room.next_window,
             "solar_exposure": self.room.solar_label,
             "window_orientation": self.room.orientation_label,
+            "ventilate_now": self.room.ventilate_now,
+            "close_window": self.room.close_window,
+            "close_window_reason": self.room.close_window_reason,
+            "close_cover": self.room.close_cover,
+            "close_cover_reason": self.room.close_cover_reason,
         }

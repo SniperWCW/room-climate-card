@@ -148,6 +148,10 @@ class RoomClimateCard extends HTMLElement {
         orientationLabel: attrs.window_orientation || null,
         solarExposure: attrs.solar_exposure || "kein relevanter Sonneneintrag",
         windowText,
+        closeWindow: attrs.close_window === true,
+        closeWindowReason: attrs.close_window_reason || "",
+        closeCover: attrs.close_cover === true,
+        closeCoverReason: attrs.close_cover_reason || "",
         roomType,
         profile,
       };
@@ -1167,6 +1171,10 @@ class RoomClimateCard extends HTMLElement {
   }
 
   managedRoomHtml(room) {
+    const actionHints = [
+      room.closeWindow && room.closeWindowReason ? `<div><b>Fenster schliessen:</b> ${room.closeWindowReason}</div>` : "",
+      room.closeCover && room.closeCoverReason ? `<div><b>Rollladen schliessen:</b> ${room.closeCoverReason}</div>` : "",
+    ].filter(Boolean);
     const ventilationClass =
       room.dehumidifyAdvice || room.coolingAdvice
         ? room.dehumidifyAdvice.includes("offen") || room.coolingAdvice.includes("offen")
@@ -1191,6 +1199,8 @@ class RoomClimateCard extends HTMLElement {
             <span>Luftfeuchtigkeit ${room.humidity?.toFixed(0) ?? "-"} %</span>
             ${room.dehumidifyAdvice ? `<span>Entfeuchtung ${room.dehumidifyAdvice}</span>` : ""}
             ${room.coolingAdvice ? `<span>Abkühlung ${room.coolingAdvice}</span>` : ""}
+            ${room.closeWindow && room.closeWindowReason ? `<span>Fenster schliessen ${room.closeWindowReason}</span>` : ""}
+            ${room.closeCover && room.closeCoverReason ? `<span>Rollladen schliessen ${room.closeCoverReason}</span>` : ""}
           </div>
         </div>
       `;
@@ -1208,10 +1218,11 @@ class RoomClimateCard extends HTMLElement {
 
         <div class="text">${room.description}</div>
 
-        ${(room.dehumidifyAdvice || room.coolingAdvice) ? `
+        ${(room.dehumidifyAdvice || room.coolingAdvice || actionHints.length) ? `
           <div class="ventilation-box">
             ${room.dehumidifyAdvice ? `<div><b>Entfeuchtung:</b> ${room.dehumidifyAdvice}</div>` : ""}
             ${room.coolingAdvice ? `<div><b>Abkühlung:</b> ${room.coolingAdvice}</div>` : ""}
+            ${actionHints.join("")}
             ${room.nextWindow ? `<div class="next-window"><b>${room.nextWindow}</b></div>` : ""}
           </div>
         ` : ""}
@@ -1252,7 +1263,7 @@ class RoomClimateCard extends HTMLElement {
                       (room) => `
                         <div class="group-row">
                           <span>${room.name}</span>
-                          <span>${room.recommendation || "Keine Empfehlung"}</span>
+                          <span>${[room.recommendation || "Keine Empfehlung", room.closeWindowReason, room.closeCoverReason].filter(Boolean).join(" · ")}</span>
                           <b>${room.score}/100</b>
                         </div>
                       `
