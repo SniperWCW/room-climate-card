@@ -1234,7 +1234,6 @@ class RoomClimateCard extends HTMLElement {
           <div><b>Humidex:</b> ${room.humidexValue?.toFixed(1) ?? "-"}</div>
           <div><b>Sommer Simmer:</b> ${room.simmerText}</div>
           ${room.orientationLabel ? `<div><b>Fensterlage:</b> ${room.orientationLabel} · ${room.solarExposure}</div>` : ""}
-          <div><b>Fenster:</b> ${room.windowText}</div>
         </div>
       </div>
     `;

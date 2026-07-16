@@ -470,9 +470,10 @@ def evaluate_room(
         else None
     )
     cover_temp_threshold = max(profile["temp_max"] + 4, 24.5)
+    cover_available = bool(room.get(CONF_COVER))
+    cover_can_be_closed = not cover_available or cover_state not in {"closed", "closing"}
     close_cover = bool(
-        room.get(CONF_COVER)
-        and cover_state not in {"closed", "closing"}
+        cover_can_be_closed
         and solar_exposure["level"] == "direct"
         and inside_temp is not None
         and inside_temp >= cover_temp_threshold
