@@ -147,6 +147,7 @@ class RoomClimateCard extends HTMLElement {
         simmerText: this.getSimmerText(attrs.simmer_felt ?? null),
         orientationLabel: attrs.window_orientation || null,
         solarExposure: attrs.solar_exposure || "kein relevanter Sonneneintrag",
+        windEffect: attrs.wind_effect || "",
         windowText,
         closeWindow: attrs.close_window === true,
         closeWindowReason: attrs.close_window_reason || "",
@@ -173,6 +174,7 @@ class RoomClimateCard extends HTMLElement {
         temperature: null,
         humidity: null,
         windSpeed: null,
+        windBearing: null,
       };
     }
 
@@ -181,12 +183,14 @@ class RoomClimateCard extends HTMLElement {
     const temperature = Number(attrs.temperature);
     const humidity = Number(attrs.humidity);
     const windSpeed = Number(attrs.wind_speed);
+    const windBearing = Number(attrs.wind_bearing);
     const cloudCoverage = Number(attrs.cloud_coverage);
 
     return {
       temperature: Number.isFinite(temperature) ? temperature : null,
       humidity: Number.isFinite(humidity) ? humidity : null,
       windSpeed: Number.isFinite(windSpeed) ? windSpeed : null,
+      windBearing: Number.isFinite(windBearing) ? windBearing : null,
       cloudCoverage: Number.isFinite(cloudCoverage) ? cloudCoverage : null,
     };
   }
@@ -555,7 +559,10 @@ class RoomClimateCard extends HTMLElement {
     const outsideWeather = this.getOutsideWeatherMetrics();
     const outsideTemp = outsideWeather.temperature;
     const outsideWind = outsideWeather.windSpeed;
+    const outsideWindBearing = outsideWeather.windBearing;
     const solarExposure = this.getSolarExposure(room);
+    const windDurationAdjustment = this.getWindDurationAdjustment(room, outsideWind, outsideWindBearing);
+    const windCoolingBonus = this.getWindCoolingBonus(room, outsideWind, outsideWindBearing);
     const hasWindowSensor = Boolean(room.window);
     const windowState = this.getState(room.window);
     const windowOpen = ["on", "open", "tilted"].includes(windowState);
@@ -566,8 +573,8 @@ class RoomClimateCard extends HTMLElement {
     const strongDiff = profile.ventStrongDiff ?? 1.5;
     const diff = insideAbs !== null && outsideAbs !== null ? insideAbs - outsideAbs : null;
     const coolingDelta = insideTemp !== null && outsideTemp !== null ? insideTemp - outsideTemp : null;
-    const requiredCoolingDelta = 2 + (solarExposure.level === "direct" ? 1 : solarExposure.level === "indirect" ? 0.5 : 0);
-    const strongCoolingDelta = 4 + (solarExposure.level === "direct" ? 1 : solarExposure.level === "indirect" ? 0.5 : 0);
+    const requiredCoolingDelta = Math.max(1, 2 + (solarExposure.level === "direct" ? 1 : solarExposure.level === "indirect" ? 0.5 : 0) - windCoolingBonus);
+    const strongCoolingDelta = Math.max(requiredCoolingDelta + 1.5, 4 + (solarExposure.level === "direct" ? 1 : solarExposure.level === "indirect" ? 0.5 : 0) - windCoolingBonus);
     const canCool = coolingDelta !== null && insideTemp >= 27 && coolingDelta >= requiredCoolingDelta;
     const strongCooling = coolingDelta !== null && insideTemp >= 29 && coolingDelta >= strongCoolingDelta;
 
@@ -579,7 +586,10 @@ class RoomClimateCard extends HTMLElement {
       outsideAbs,
       outsideTemp,
       outsideWind,
+      outsideWindBearing,
       solarExposure,
+      windDurationAdjustment,
+      windCoolingBonus,
       hasWindowSensor,
       windowState,
       windowOpen,
@@ -631,7 +641,12 @@ class RoomClimateCard extends HTMLElement {
       return { icon: "🌬️", level: "neutral", text: "Fenster geschlossen halten. Für Entfeuchtung fehlt aktuell ein belastbarer Außenvergleich." };
     }
 
-    const duration = this.getVentilationDuration(room, ctx.diff, Number.isFinite(ctx.outsideWind) ? ctx.outsideWind : null);
+    const duration = this.getVentilationDuration(
+      room,
+      ctx.diff,
+      Number.isFinite(ctx.outsideWind) ? ctx.outsideWind : null,
+      ctx.windDurationAdjustment,
+    );
 
     if (ctx.humidityVeryHigh && ctx.diff >= ctx.strongDiff) {
       return {
@@ -694,7 +709,11 @@ class RoomClimateCard extends HTMLElement {
       };
     }
 
-    const duration = this.getCoolingDuration(ctx.coolingDelta, Number.isFinite(ctx.outsideWind) ? ctx.outsideWind : null);
+    const duration = this.getCoolingDuration(
+      ctx.coolingDelta,
+      Number.isFinite(ctx.outsideWind) ? ctx.outsideWind : null,
+      ctx.windDurationAdjustment,
+    );
 
     if (ctx.strongCooling && (ctx.diff === null || ctx.diff > -1.0)) {
       return { icon: "🧊", level: "cooling", text: `Fenster öffnen. Abkühlen ist jetzt sinnvoll, ca. ${duration} Min.` };
@@ -730,7 +749,7 @@ class RoomClimateCard extends HTMLElement {
     return dehumidify || cooling;
   }
 
-  getVentilationDuration(room, diff, windSpeed = null) {
+  getVentilationDuration(room, diff, windSpeed = null, windAdjustment = 0) {
     let duration;
     switch (room.room_type) {
       case "bathroom":
@@ -771,10 +790,12 @@ class RoomClimateCard extends HTMLElement {
       else if (windSpeed <= 5) duration += 1;
     }
 
+    duration += windAdjustment;
+
     return Math.max(3, duration);
   }
 
-  getCoolingDuration(coolingDelta, windSpeed = null) {
+  getCoolingDuration(coolingDelta, windSpeed = null, windAdjustment = 0) {
     let duration;
     if (coolingDelta >= 8) duration = 15;
     else if (coolingDelta >= 6) duration = 12;
@@ -787,7 +808,93 @@ class RoomClimateCard extends HTMLElement {
       else if (windSpeed <= 5) duration += 1;
     }
 
+    duration += windAdjustment;
+
     return Math.max(5, duration);
+  }
+
+  getWindAngle(room, windBearing) {
+    const orientation = String(room.window_orientation || "").toUpperCase();
+    const facadeAzimuth = {
+      N: 0,
+      NO: 45,
+      O: 90,
+      SO: 135,
+      S: 180,
+      SW: 225,
+      W: 270,
+      NW: 315,
+    }[orientation];
+    if (!Number.isFinite(facadeAzimuth) || !Number.isFinite(windBearing)) {
+      return null;
+    }
+
+    return this.getAngularDifference(windBearing, facadeAzimuth);
+  }
+
+  getWindDurationAdjustment(room, windSpeed, windBearing) {
+    const windAngle = this.getWindAngle(room, windBearing);
+    if (windAngle === null || windSpeed === null || windSpeed < 3) {
+      return 0;
+    }
+
+    if (windAngle <= 60) {
+      return windSpeed >= 16 ? -2 : -1;
+    }
+
+    if (windAngle <= 110) {
+      return windSpeed >= 12 ? -1 : 0;
+    }
+
+    if (windAngle >= 150 && windSpeed >= 12) {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  getWindCoolingBonus(room, windSpeed, windBearing) {
+    const windAngle = this.getWindAngle(room, windBearing);
+    if (windAngle === null || windSpeed === null || windSpeed < 5) {
+      return 0;
+    }
+
+    if (windAngle <= 60) {
+      return windSpeed >= 16 ? 0.8 : 0.4;
+    }
+
+    if (windAngle <= 110) {
+      return windSpeed >= 12 ? 0.3 : 0;
+    }
+
+    if (windAngle >= 150 && windSpeed >= 16) {
+      return -0.3;
+    }
+
+    return 0;
+  }
+
+  getWindEffectText(room, windSpeed, windBearing) {
+    const windAngle = this.getWindAngle(room, windBearing);
+    if (windAngle === null || windSpeed === null || windBearing === null || windSpeed < 3) {
+      return null;
+    }
+
+    const directions = ["Nord", "Nordost", "Ost", "Suedost", "Sued", "Suedwest", "West", "Nordwest"];
+    const directionLabel = directions[Math.floor((((windBearing % 360) + 22.5) / 45)) % directions.length];
+
+    let effect;
+    if (windAngle <= 60) {
+      effect = "guenstig";
+    } else if (windAngle <= 110) {
+      effect = "seitlich guenstig";
+    } else if (windAngle >= 150) {
+      effect = "eher unguenstig";
+    } else {
+      effect = "neutral";
+    }
+
+    return `aus ${directionLabel}, ${effect} bei ${windSpeed.toFixed(0)} km/h`;
   }
 
   calculateScore(room) {
@@ -1057,6 +1164,8 @@ class RoomClimateCard extends HTMLElement {
     const description = this.getDescription(room, score, temp, dewText, humidexText);
     const ventilationClass = ventilation ? `vent-${ventilation.level}` : "vent-none";
     const solarExposure = this.getSolarExposure(room);
+    const outsideWeather = this.getOutsideWeatherMetrics();
+    const windEffectText = this.getWindEffectText(room, outsideWeather.windSpeed, outsideWeather.windBearing);
     const orientationLabel = this.formatOrientationLabel(room.window_orientation);
 
     const windowText = room.window
@@ -1112,6 +1221,7 @@ class RoomClimateCard extends HTMLElement {
           <div><b>Humidex:</b> ${humidexValue?.toFixed(1) ?? "-"}</div>
           <div><b>Sommer Simmer:</b> ${simmerText}</div>
           ${orientationLabel ? `<div><b>☀️ Fensterlage:</b> ${orientationLabel} · ${solarExposure.label}</div>` : ""}
+          ${windEffectText ? `<div><b>Wind:</b> ${windEffectText}</div>` : ""}
           <div><b>🪟 Fenster:</b> ${windowText}</div>
         </div>
       </div>
@@ -1234,6 +1344,7 @@ class RoomClimateCard extends HTMLElement {
           <div><b>Humidex:</b> ${room.humidexValue?.toFixed(1) ?? "-"}</div>
           <div><b>Sommer Simmer:</b> ${room.simmerText}</div>
           ${room.orientationLabel ? `<div><b>Fensterlage:</b> ${room.orientationLabel} · ${room.solarExposure}</div>` : ""}
+          ${room.windEffect ? `<div><b>Wind:</b> ${room.windEffect}</div>` : ""}
         </div>
       </div>
     `;

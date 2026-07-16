@@ -110,6 +110,65 @@ def get_solar_exposure(room: dict[str, Any], sun: dict[str, Any], outside_weathe
     return {"level": "none", "label": "kein relevanter Sonneneintrag"}
 
 
+def get_wind_angle(room: dict[str, Any], outside_weather: dict[str, Any]) -> float | None:
+    orientation = str(room.get(CONF_WINDOW_ORIENTATION, "")).upper()
+    facade_azimuth = ORIENTATION_AZIMUTH.get(orientation)
+    wind_bearing = outside_weather.get("wind_bearing")
+    if facade_azimuth is None or wind_bearing is None:
+        return None
+    return angular_difference(wind_bearing, facade_azimuth)
+
+
+def get_wind_duration_adjustment(room: dict[str, Any], outside_weather: dict[str, Any]) -> int:
+    wind_speed = outside_weather.get("wind_speed")
+    wind_angle = get_wind_angle(room, outside_weather)
+    if wind_speed is None or wind_angle is None or wind_speed < 3:
+        return 0
+    if wind_angle <= 60:
+        return -2 if wind_speed >= 16 else -1
+    if wind_angle <= 110:
+        return -1 if wind_speed >= 12 else 0
+    if wind_angle >= 150 and wind_speed >= 12:
+        return 1
+    return 0
+
+
+def get_wind_cooling_bonus(room: dict[str, Any], outside_weather: dict[str, Any]) -> float:
+    wind_speed = outside_weather.get("wind_speed")
+    wind_angle = get_wind_angle(room, outside_weather)
+    if wind_speed is None or wind_angle is None or wind_speed < 5:
+        return 0.0
+    if wind_angle <= 60:
+        return 0.8 if wind_speed >= 16 else 0.4
+    if wind_angle <= 110:
+        return 0.3 if wind_speed >= 12 else 0.0
+    if wind_angle >= 150 and wind_speed >= 16:
+        return -0.3
+    return 0.0
+
+
+def get_wind_effect_text(room: dict[str, Any], outside_weather: dict[str, Any]) -> str | None:
+    wind_speed = outside_weather.get("wind_speed")
+    wind_bearing = outside_weather.get("wind_bearing")
+    wind_angle = get_wind_angle(room, outside_weather)
+    if wind_speed is None or wind_bearing is None or wind_angle is None or wind_speed < 3:
+        return None
+
+    directions = ["Nord", "Nordost", "Ost", "Suedost", "Sued", "Suedwest", "West", "Nordwest"]
+    direction_label = directions[int(((wind_bearing % 360) + 22.5) // 45) % len(directions)]
+
+    if wind_angle <= 60:
+        effect = "guenstig"
+    elif wind_angle <= 110:
+        effect = "seitlich guenstig"
+    elif wind_angle >= 150:
+        effect = "eher unguenstig"
+    else:
+        effect = "neutral"
+
+    return f"aus {direction_label}, {effect} bei {wind_speed:.0f} km/h"
+
+
 def get_recommended_cool_temp_threshold(profile: dict[str, float], solar_exposure: dict[str, str]) -> float:
     threshold = min(profile["temp_max"] + 4, 26)
     if solar_exposure["level"] == "direct":
@@ -139,7 +198,7 @@ def get_next_cooling_window(room: dict[str, Any], forecast: list[dict[str, Any]]
     return {"threshold": threshold, "time_text": None, "entry": None}
 
 
-def get_ventilation_duration(room_type: str, diff: float, wind_speed: float | None) -> int:
+def get_ventilation_duration(room_type: str, diff: float, wind_speed: float | None, wind_adjustment: int = 0) -> int:
     if room_type == "bathroom":
         duration = 5 if diff >= 4 else 7 if diff >= 2.5 else 10 if diff >= 1.5 else 12
     elif room_type == "kitchen":
@@ -158,10 +217,11 @@ def get_ventilation_duration(room_type: str, diff: float, wind_speed: float | No
             duration -= 1
         elif wind_speed <= 5:
             duration += 1
+    duration += wind_adjustment
     return max(3, duration)
 
 
-def get_cooling_duration(cooling_delta: float, wind_speed: float | None) -> int:
+def get_cooling_duration(cooling_delta: float, wind_speed: float | None, wind_adjustment: int = 0) -> int:
     duration = 15 if cooling_delta >= 8 else 12 if cooling_delta >= 6 else 10 if cooling_delta >= 4 else 8
     if wind_speed is not None:
         if wind_speed >= 20:
@@ -170,6 +230,7 @@ def get_cooling_duration(cooling_delta: float, wind_speed: float | None) -> int:
             duration -= 1
         elif wind_speed <= 5:
             duration += 1
+    duration += wind_adjustment
     return max(5, duration)
 
 
@@ -340,10 +401,14 @@ def evaluate_room(
     inside_abs = metrics.get(CONF_INSIDE_ABSOLUTE_HUMIDITY)
     outside_temp = outside_weather.get("temperature")
     outside_wind = outside_weather.get("wind_speed")
+    wind_bearing = outside_weather.get("wind_bearing")
     window_state = metrics.get(CONF_WINDOW)
     cover_state = metrics.get(CONF_COVER)
     window_open = window_state in {"on", "open", "tilted"}
     solar_exposure = get_solar_exposure(room, sun, outside_weather)
+    wind_duration_adjustment = get_wind_duration_adjustment(room, outside_weather)
+    wind_cooling_bonus = get_wind_cooling_bonus(room, outside_weather)
+    wind_effect_text = get_wind_effect_text(room, outside_weather)
     orientation_label = ORIENTATION_LABEL.get(str(room.get(CONF_WINDOW_ORIENTATION, "")).upper())
 
     humidity_high = inside_rel is not None and inside_rel >= profile["humidity_max"]
@@ -351,8 +416,14 @@ def evaluate_room(
     humidity_too_dry = inside_rel is not None and inside_rel < max(profile["humidity_min"] - 5, 35)
     diff = inside_abs - outside_abs if inside_abs is not None and outside_abs is not None else None
     cooling_delta = inside_temp - outside_temp if inside_temp is not None and outside_temp is not None else None
-    required_cooling_delta = 2 + (1 if solar_exposure["level"] == "direct" else 0.5 if solar_exposure["level"] == "indirect" else 0)
-    strong_cooling_delta = 4 + (1 if solar_exposure["level"] == "direct" else 0.5 if solar_exposure["level"] == "indirect" else 0)
+    required_cooling_delta = max(
+        1.0,
+        2 + (1 if solar_exposure["level"] == "direct" else 0.5 if solar_exposure["level"] == "indirect" else 0) - wind_cooling_bonus,
+    )
+    strong_cooling_delta = max(
+        required_cooling_delta + 1.5,
+        4 + (1 if solar_exposure["level"] == "direct" else 0.5 if solar_exposure["level"] == "indirect" else 0) - wind_cooling_bonus,
+    )
     can_cool = cooling_delta is not None and inside_temp is not None and inside_temp >= 27 and cooling_delta >= required_cooling_delta
     strong_cooling = cooling_delta is not None and inside_temp is not None and inside_temp >= 29 and cooling_delta >= strong_cooling_delta
     cooling_window = get_next_cooling_window(room, forecast, solar_exposure)
@@ -390,7 +461,7 @@ def evaluate_room(
             )
             dehumidify_level = "observe" if humidity_very_high else "neutral"
         else:
-            duration = get_ventilation_duration(room.get(CONF_ROOM_TYPE, "default"), diff or 0, outside_wind)
+            duration = get_ventilation_duration(room.get(CONF_ROOM_TYPE, "default"), diff or 0, outside_wind, wind_duration_adjustment)
             if humidity_very_high and diff is not None and diff >= profile["vent_strong"]:
                 dehumidify_text = f"Entfeuchten sinnvoll, ca. {duration} Min."
                 dehumidify_level = "recommended"
@@ -427,7 +498,7 @@ def evaluate_room(
             cooling_text = f"Fenster geschlossen halten. Außenluft bringt derzeit keine nennenswerte Abkühlung.{sun_text}"
             cooling_level = "neutral"
         else:
-            duration = get_cooling_duration(cooling_delta, outside_wind)
+            duration = get_cooling_duration(cooling_delta, outside_wind, wind_duration_adjustment)
             if strong_cooling and (diff is None or diff > -1.0):
                 cooling_text = f"Fenster öffnen. Abkühlen ist jetzt sinnvoll, ca. {duration} Min."
                 cooling_level = "cooling"
@@ -492,6 +563,7 @@ def evaluate_room(
         "outside_absolute_humidity": outside_abs,
         "outside_temperature": outside_temp,
         "outside_wind_speed": outside_wind,
+        "outside_wind_bearing": wind_bearing,
         "humidex": humidex_value,
         "humidex_felt": metrics.get(CONF_HUMIDEX),
         "scharlau_felt": metrics.get(CONF_SCHARLAU),
@@ -508,6 +580,7 @@ def evaluate_room(
         "window_open": window_open,
         "window_orientation": orientation_label,
         "solar_exposure": solar_exposure["label"],
+        "wind_effect": wind_effect_text,
         "cover_state": cover_state,
         "cover_entity": room.get(CONF_COVER),
         "notification_flags": {

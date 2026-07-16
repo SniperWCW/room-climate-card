@@ -96,6 +96,7 @@ class RoomClimateRecommendationSensor(RoomClimateBaseSensor):
             "recommendation": self.room.recommendation,
             "next_ventilation_window": self.room.next_window,
             "solar_exposure": self.room.solar_label,
+            "wind_effect": self.room.attributes.get("wind_effect"),
             "window_orientation": self.room.orientation_label,
             "ventilate_now": self.room.ventilate_now,
             "close_window": self.room.close_window,

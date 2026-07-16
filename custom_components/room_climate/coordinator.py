@@ -88,6 +88,7 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "temperature": as_float(attrs.get("temperature")),
             "humidity": as_float(attrs.get("humidity")),
             "wind_speed": as_float(attrs.get("wind_speed")),
+            "wind_bearing": as_float(attrs.get("wind_bearing")),
             "cloud_coverage": as_float(attrs.get("cloud_coverage")),
             "sun_azimuth": None,
         }
