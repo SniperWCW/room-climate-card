@@ -191,9 +191,14 @@ def format_forecast_time(value: str | None) -> str | None:
 def get_next_cooling_window(room: dict[str, Any], forecast: list[dict[str, Any]], solar_exposure: dict[str, str]) -> dict[str, Any]:
     profile = get_room_profile(room.get(CONF_ROOM_TYPE, "default"))
     threshold = get_recommended_cool_temp_threshold(profile, solar_exposure)
+    now = datetime.now().astimezone()
     for entry in forecast:
         temp = as_float(entry.get("temperature"))
-        if temp is not None and temp <= threshold:
+        try:
+            entry_dt = datetime.fromisoformat(str(entry.get("datetime", "")).replace("Z", "+00:00")).astimezone()
+        except ValueError:
+            entry_dt = None
+        if temp is not None and temp <= threshold and (entry_dt is None or entry_dt >= now):
             return {"threshold": threshold, "time_text": format_forecast_time(entry.get("datetime")), "entry": entry}
     return {"threshold": threshold, "time_text": None, "entry": None}
 
@@ -513,11 +518,11 @@ def evaluate_room(
     if room.get(CONF_WINDOW) and cooling_level not in {"cooling", "open"}:
         if cooling_window["time_text"]:
             next_window = (
-                f"ab {cooling_window['time_text']} Uhr, wenn die Außentemperatur unter "
+                f"Nächstes Lüftungsfenster: frühestens ab {cooling_window['time_text']} Uhr, wenn die Außentemperatur unter "
                 f"{cooling_window['threshold']:.1f} °C fällt."
             )
         else:
-            next_window = f"sobald die Außentemperatur unter {cooling_window['threshold']:.1f} °C fällt."
+            next_window = f"Nächstes Lüftungsfenster: sobald die Außentemperatur unter {cooling_window['threshold']:.1f} °C fällt."
 
     score = calculate_score(room, metrics)
     humidex_value = metrics.get(CONF_HUMIDEX_VALUE)

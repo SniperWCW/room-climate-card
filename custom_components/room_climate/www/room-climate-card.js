@@ -422,7 +422,15 @@ class RoomClimateCard extends HTMLElement {
   getNextCoolingWindow(room) {
     const threshold = this.getRecommendedCoolTempThreshold(room);
     const forecast = this.getOutsideForecast();
-    const next = forecast.find((entry) => entry.temperature <= threshold);
+    const now = Date.now();
+    const next = forecast.find((entry) => {
+      if (!Number.isFinite(entry.temperature) || entry.temperature > threshold) {
+        return false;
+      }
+
+      const entryTime = new Date(entry.datetime).getTime();
+      return Number.isNaN(entryTime) || entryTime >= now;
+    });
 
     if (!next) {
       return { threshold, timeText: null };
@@ -446,7 +454,7 @@ class RoomClimateCard extends HTMLElement {
         .replace(".", ",")} °C fällt.`;
     }
 
-    return `🕒 Nächstes Lüftungsfenster: ab ${coolingWindow.timeText} Uhr, wenn die Außentemperatur unter ${coolingWindow.threshold
+    return `🕒 Nächstes Lüftungsfenster: frühestens ab ${coolingWindow.timeText} Uhr, wenn die Außentemperatur unter ${coolingWindow.threshold
       .toFixed(1)
       .replace(".", ",")} °C fällt.`;
   }
