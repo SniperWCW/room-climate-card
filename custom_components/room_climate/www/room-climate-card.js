@@ -2546,12 +2546,20 @@ class RoomClimateCardEditor extends HTMLElement {
   }
 }
 
-customElements.define("room-climate-card", RoomClimateCard);
-customElements.define("room-climate-card-editor", RoomClimateCardEditor);
+// Home Assistant can reload extra frontend modules after an integration reload.
+// Avoid aborting the bundle when the browser already has this card registered.
+if (!customElements.get("room-climate-card")) {
+  customElements.define("room-climate-card", RoomClimateCard);
+}
+if (!customElements.get("room-climate-card-editor")) {
+  customElements.define("room-climate-card-editor", RoomClimateCardEditor);
+}
 
 window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "room-climate-card",
-  name: "Room Climate Card",
-  description: "Raumklima Card mit Score, Zielwerten, Lüftungsempfehlung, Fenstersensoren und UI-Auswahl",
-});
+if (!window.customCards.some((card) => card.type === "room-climate-card")) {
+  window.customCards.push({
+    type: "room-climate-card",
+    name: "Room Climate Card",
+    description: "Raumklima Card mit Score, Zielwerten, Lüftungsempfehlung, Fenstersensoren und UI-Auswahl",
+  });
+}

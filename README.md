@@ -34,6 +34,8 @@ type: custom:room-climate-card
 
 You do not need to add a separate Lovelace resource manually. The integration registers the card automatically.
 
+After installing or updating the integration, restart Home Assistant and reload the browser once (Ctrl+F5). This lets the active frontend session load the bundled card module. If a reverse proxy or a kiosk browser blocks dynamic resources, add `/room-climate/room-climate-card.js` as a **JavaScript module** under Settings > Dashboards > Resources.
+
 ## Created Entities
 
 For the whole installation, the integration creates:
