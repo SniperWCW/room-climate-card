@@ -159,6 +159,43 @@ class RoomClimateCard extends HTMLElement {
     });
   }
 
+  getManagedOverview() {
+    const overview = Object.values(this._hass?.states || {}).find(
+      (stateObj) => stateObj?.attributes?.managed_by === "room_climate" && stateObj?.attributes?.day_type
+    );
+    if (!overview) return null;
+
+    const attrs = overview.attributes || {};
+    return {
+      dayType: attrs.day_type || overview.state,
+      summary: attrs.summary || "",
+      high: Number.isFinite(Number(attrs.forecast_high)) ? Number(attrs.forecast_high) : null,
+      low: Number.isFinite(Number(attrs.forecast_low)) ? Number(attrs.forecast_low) : null,
+      averageScore: Number.isFinite(Number(attrs.average_score)) ? Number(attrs.average_score) : null,
+      worstRoom: attrs.worst_room || "",
+      worstRoomScore: Number.isFinite(Number(attrs.worst_room_score)) ? Number(attrs.worst_room_score) : null,
+    };
+  }
+
+  managedOverviewHtml() {
+    const overview = this.getManagedOverview();
+    if (!overview) return "";
+
+    const forecast = overview.high !== null
+      ? `Heute ${overview.low?.toFixed(0) ?? "-"} bis ${overview.high.toFixed(0)} C`
+      : "Wetterprognose nicht verfuegbar";
+    const roomStatus = overview.averageScore !== null
+      ? `Durchschnitt ${overview.averageScore}/100${overview.worstRoom ? ` · Niedrigster Wert: ${overview.worstRoom} (${overview.worstRoomScore}/100)` : ""}`
+      : "";
+    return `
+      <div class="overview">
+        <div class="overview-title">${overview.dayType}</div>
+        <div class="overview-summary">${overview.summary}</div>
+        <div class="overview-meta">${forecast}${roomStatus ? ` · ${roomStatus}` : ""}</div>
+      </div>
+    `;
+  }
+
   getState(entity) {
     return entity && this._hass?.states?.[entity] ? this._hass.states[entity].state : null;
   }
@@ -1369,9 +1406,10 @@ class RoomClimateCard extends HTMLElement {
 
     return `
       <ha-card>
-        <div class="content">
-          <div class="title">Raumklima</div>
-          ${Object.entries(groups)
+          <div class="content">
+            <div class="title">Raumklima</div>
+            ${this.managedOverviewHtml()}
+            ${Object.entries(groups)
             .map(
               ([label, rooms]) => `
                 <div class="group">
@@ -1412,6 +1450,7 @@ class RoomClimateCard extends HTMLElement {
         <ha-card>
           <div class="content">
             <div class="title">Raumklima</div>
+            ${this.managedOverviewHtml()}
             <div class="grid" style="grid-template-columns: repeat(${this.config.columns}, minmax(0, 1fr));">
               ${rooms.map((room) => this.managedRoomHtml(room)).join("")}
             </div>
@@ -1447,6 +1486,16 @@ class RoomClimateCard extends HTMLElement {
       <style>
         .content { padding: 16px; }
         .title { font-size: 20px; font-weight: 700; margin-bottom: 14px; }
+        .overview {
+          margin: -2px 0 14px;
+          padding: 12px;
+          border-radius: 14px;
+          border-left: 5px solid var(--primary-color);
+          background: color-mix(in srgb, var(--primary-color) 10%, transparent);
+        }
+        .overview-title { font-size: 15px; font-weight: 700; }
+        .overview-summary { margin-top: 4px; line-height: 1.4; }
+        .overview-meta { margin-top: 7px; font-size: 12px; color: var(--secondary-text-color); }
         .grid { display: grid; gap: 12px; }
         .room {
           border-radius: 18px;

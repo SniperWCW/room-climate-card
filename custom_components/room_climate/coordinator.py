@@ -182,6 +182,67 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self._async_send_notification(room, notification_type)
                 self.last_notification_at[key] = now
 
+    @staticmethod
+    def _build_overview(
+        rooms: dict[str, RoomResult],
+        outside_weather: dict[str, Any],
+        forecast: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Build a short, actionable house-wide briefing from room decisions."""
+        temperatures = [
+            temperature
+            for entry in forecast[:24]
+            if (temperature := as_float(entry.get("temperature"))) is not None
+        ]
+        current_temperature = outside_weather.get("temperature")
+        high = max(temperatures) if temperatures else current_temperature
+        low = min(temperatures) if temperatures else current_temperature
+
+        if high is not None and high >= 30:
+            day_type, icon = "Hitzetag", "mdi:weather-sunny-alert"
+        elif high is not None and high >= 25:
+            day_type, icon = "Sommertag", "mdi:weather-sunny"
+        elif high is not None and high >= 18:
+            day_type, icon = "Milder Tag", "mdi:weather-partly-cloudy"
+        else:
+            day_type, icon = "Kuehler Tag", "mdi:weather-cloudy"
+
+        ventilate = [room.name for room in rooms.values() if room.ventilate_now]
+        close_windows = [room.name for room in rooms.values() if room.close_window]
+        close_covers = [room.name for room in rooms.values() if room.close_cover]
+        actions: list[str] = []
+        if ventilate:
+            actions.append(f"Jetzt lueften: {', '.join(ventilate)}.")
+        if close_covers:
+            actions.append(f"Sonne aussperren: {', '.join(close_covers)}.")
+        if close_windows:
+            actions.append(f"Fenster schliessen: {', '.join(close_windows)}.")
+
+        if not actions:
+            if day_type in {"Hitzetag", "Sommertag"}:
+                actions.append("Tagsueber Fenster und Beschattung geschlossen halten; zum Abkuehlen das naechste Lueftungsfenster abwarten.")
+            else:
+                actions.append("Aktuell besteht keine vorrangige Massnahme.")
+
+        scores = [room.score for room in rooms.values()]
+        worst_room = min(rooms.values(), key=lambda room: room.score, default=None)
+        return {
+            "day_type": day_type,
+            "icon": icon,
+            "summary": " ".join(actions),
+            "actions": actions,
+            "outdoor_temperature": current_temperature,
+            "forecast_high": high,
+            "forecast_low": low,
+            "average_score": round(sum(scores) / len(scores)) if scores else None,
+            "room_count": len(rooms),
+            "ventilate_count": len(ventilate),
+            "close_window_count": len(close_windows),
+            "close_cover_count": len(close_covers),
+            "worst_room": worst_room.name if worst_room else None,
+            "worst_room_score": worst_room.score if worst_room else None,
+        }
+
     async def _async_update_data(self) -> dict[str, Any]:
         outside_abs = as_float(self._get_state(self.config.get(CONF_OUTSIDE_ABSOLUTE_HUMIDITY)))
         outside_weather = self._collect_outside_weather()
@@ -196,8 +257,10 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             room_results[result.room_id] = result
 
         await self._async_process_notifications(room_results)
+        overview = self._build_overview(room_results, outside_weather, forecast)
         return {
             "rooms": room_results,
+            "overview": overview,
             "forecast": forecast,
             "outside_weather": outside_weather,
             "sun": sun,

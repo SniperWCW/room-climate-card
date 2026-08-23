@@ -9,6 +9,7 @@ Features:
 - room climate scoring per room
 - separate advice for dehumidifying and cooling
 - hourly ventilation window forecast from `weather.*`
+- house-wide daily briefing with weather-based day type and prioritised actions
 - optional `sun.sun` and window orientation handling
 - binary sensors for:
   - ventilate now
@@ -34,6 +35,12 @@ type: custom:room-climate-card
 You do not need to add a separate Lovelace resource manually. The integration registers the card automatically.
 
 ## Created Entities
+
+For the whole installation, the integration creates:
+
+- `sensor.room_climate_tageslage` (actual entity ID depends on your integration name)
+
+The day briefing classifies the next 24 hours as a cool, mild, summer, or hot day. Its attributes contain the forecast range, average room score, most affected room, and a ready-to-use action summary for dashboards and automations. The bundled card displays this briefing automatically.
 
 For each configured room, the integration creates:
 

@@ -18,12 +18,45 @@ async def async_setup_entry(
 ) -> None:
     coordinator: RoomClimateCoordinator = hass.data[DOMAIN][entry.entry_id].coordinator
     rooms = coordinator.config.get("rooms", [])
-    entities: list[SensorEntity] = []
+    entities: list[SensorEntity] = [RoomClimateOverviewSensor(coordinator, entry)]
     for room in rooms:
         room_id = room["id"]
         entities.append(RoomClimateScoreSensor(coordinator, entry, room_id))
         entities.append(RoomClimateRecommendationSensor(coordinator, entry, room_id))
     async_add_entities(entities)
+
+
+class RoomClimateOverviewSensor(CoordinatorEntity[RoomClimateCoordinator], SensorEntity):
+    """Expose the house-wide briefing for dashboards and automations."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Tageslage"
+
+    def __init__(self, coordinator: RoomClimateCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self.entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_overview"
+
+    @property
+    def native_value(self):
+        return self.coordinator.data["overview"]["day_type"]
+
+    @property
+    def icon(self):
+        return self.coordinator.data["overview"]["icon"]
+
+    @property
+    def extra_state_attributes(self):
+        return {"managed_by": DOMAIN, **self.coordinator.data["overview"]}
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self.entry.entry_id)},
+            "name": "Room Climate",
+            "manufacturer": "SniperWCW",
+            "model": "Room Climate",
+        }
 
 
 class RoomClimateBaseSensor(CoordinatorEntity[RoomClimateCoordinator], SensorEntity):
