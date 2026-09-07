@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from homeassistant.util import dt as dt_util
+
 from .const import (
     CONF_COVER,
     CONF_DEWPOINT,
@@ -185,17 +187,19 @@ def format_forecast_time(value: str | None) -> str | None:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
-    return dt.astimezone().strftime("%H:%M")
+    return dt_util.as_local(dt).strftime("%H:%M")
 
 
 def get_next_cooling_window(room: dict[str, Any], forecast: list[dict[str, Any]], solar_exposure: dict[str, str]) -> dict[str, Any]:
     profile = get_room_profile(room.get(CONF_ROOM_TYPE, "default"))
     threshold = get_recommended_cool_temp_threshold(profile, solar_exposure)
-    now = datetime.now().astimezone()
+    now = dt_util.now()
     for entry in forecast:
         temp = as_float(entry.get("temperature"))
         try:
-            entry_dt = datetime.fromisoformat(str(entry.get("datetime", "")).replace("Z", "+00:00")).astimezone()
+            entry_dt = dt_util.as_local(
+                datetime.fromisoformat(str(entry.get("datetime", "")).replace("Z", "+00:00"))
+            )
         except ValueError:
             entry_dt = None
         if temp is not None and temp <= threshold and (entry_dt is None or entry_dt >= now):
@@ -373,7 +377,7 @@ def calculate_score(room: dict[str, Any], metrics: dict[str, Any]) -> int:
 class RoomResult:
     room_id: str
     name: str
-    score: int
+    score: int | None
     level_label: str
     level_icon: str
     level_class: str
@@ -524,12 +528,29 @@ def evaluate_room(
         else:
             next_window = f"Nächstes Lüftungsfenster: sobald die Außentemperatur unter {cooling_window['threshold']:.1f} °C fällt."
 
-    score = calculate_score(room, metrics)
+    inputs_available = bool(
+        metrics.get("inputs_available", inside_temp is not None and inside_rel is not None)
+    )
+    data_quality = str(
+        metrics.get(
+            "data_quality",
+            "good" if inputs_available else "unavailable",
+        )
+    )
+    score = calculate_score(room, metrics) if inputs_available else None
     humidex_value = metrics.get(CONF_HUMIDEX_VALUE)
-    level = get_display_level(score, inside_temp, humidex_value, metrics.get(CONF_SIMMER))
+    level = (
+        get_display_level(score, inside_temp, humidex_value, metrics.get(CONF_SIMMER))
+        if score is not None
+        else {"label": "Unbekannt", "cls": "unknown", "icon": "❔"}
+    )
     dew_text = get_dew_text(metrics.get(CONF_DEWPOINT))
     humidex_text = get_humidex_text(metrics.get(CONF_HUMIDEX))
-    description = get_description(room, score, inside_temp, dew_text, humidex_text, humidex_value)
+    description = (
+        get_description(room, score, inside_temp, dew_text, humidex_text, humidex_value)
+        if score is not None
+        else "Für einen Raumklima-Score fehlen aktuelle Temperatur- oder Feuchtewerte."
+    )
 
     recommendation_parts = []
     if dehumidify_text:
@@ -538,8 +559,9 @@ def evaluate_room(
         recommendation_parts.append(f"Abkühlung: {cooling_text}")
     recommendation = " | ".join(recommendation_parts) if recommendation_parts else "Keine Fenstersensor-Empfehlung verfügbar"
 
-    ventilate_now = bool((dehumidify_beneficial or cooling_beneficial) and not window_open)
-    close_window = bool(window_open and not ventilate_now)
+    ventilation_beneficial = dehumidify_beneficial or cooling_beneficial
+    ventilate_now = bool(ventilation_beneficial and not window_open)
+    close_window = bool(window_open and not ventilation_beneficial)
     close_window_reason = (
         "Fenster wieder schliessen. Die aktuelle Aussenluft bringt gerade keinen klaren Vorteil mehr."
         if close_window
@@ -574,9 +596,13 @@ def evaluate_room(
         "scharlau_felt": metrics.get(CONF_SCHARLAU),
         "simmer_felt": metrics.get(CONF_SIMMER),
         "dewpoint_felt": metrics.get(CONF_DEWPOINT),
+        "inputs_available": inputs_available,
+        "data_quality": data_quality,
+        "input_age_minutes": metrics.get("input_age_minutes"),
         "dehumidify_advice": dehumidify_text,
         "cooling_advice": cooling_text,
         "next_ventilation_window": next_window,
+        "ventilation_beneficial": ventilation_beneficial,
         "ventilate_now": ventilate_now,
         "close_window": close_window,
         "close_window_reason": close_window_reason,

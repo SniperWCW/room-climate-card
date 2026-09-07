@@ -56,4 +56,6 @@ For each configured room, the integration creates:
 
 - Push notifications are sent only when the recommendation changes from inactive to active.
 - A configurable cooldown prevents repeated notifications.
+- The `Score` exposes `inputs_available` and `data_quality`. A score is only calculated when current room temperature and humidity readings are available; source readings older than 15 minutes are marked `stale`.
+- The integration updates every five minutes. Use its values as climate context and recommendations, not as a real-time activity signal.
 - The bundled Lovelace card is still useful for rich per-room display, while the integration handles backend logic and automation-friendly entities.

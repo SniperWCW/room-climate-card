@@ -7,7 +7,9 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_NOTIFICATION_COOLDOWN,
@@ -19,6 +21,7 @@ from .const import (
     CONF_SUN_ENTITY,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    MAX_PRIMARY_INPUT_AGE,
     NOTIFICATION_CLOSE_COVER,
     NOTIFICATION_CLOSE_WINDOW,
     NOTIFICATION_VENTILATE,
@@ -44,6 +47,42 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.entry = entry
         self.last_notification_at: dict[str, datetime] = {}
         self.last_flag_state: dict[str, bool] = {}
+        self._notification_store = Store[dict[str, Any]](
+            hass, 1, f"{DOMAIN}.{entry.entry_id}.notification_state"
+        )
+
+    async def _async_restore_notification_state(self) -> None:
+        """Restore notification state before the first coordinator refresh."""
+        stored_state = await self._notification_store.async_load() or {}
+        stored_times = stored_state.get("last_notification_at", {})
+        if isinstance(stored_times, dict):
+            self.last_notification_at = {
+                key: timestamp
+                for key, value in stored_times.items()
+                if isinstance(key, str)
+                and isinstance(value, str)
+                and (timestamp := dt_util.parse_datetime(value)) is not None
+            }
+        stored_flags = stored_state.get("last_flag_state", {})
+        if isinstance(stored_flags, dict):
+            self.last_flag_state = {
+                key: value for key, value in stored_flags.items() if isinstance(key, str) and isinstance(value, bool)
+            }
+
+    async def async_config_entry_first_refresh(self) -> None:
+        """Load persisted state before calculating recommendations."""
+        await self._async_restore_notification_state()
+        await super().async_config_entry_first_refresh()
+
+    async def _async_save_notification_state(self) -> None:
+        await self._notification_store.async_save(
+            {
+                "last_notification_at": {
+                    key: timestamp.isoformat() for key, timestamp in self.last_notification_at.items()
+                },
+                "last_flag_state": self.last_flag_state,
+            }
+        )
 
     @property
     def config(self) -> dict[str, Any]:
@@ -122,6 +161,29 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 metrics[key] = self._get_state(entity_id)
             else:
                 metrics[key] = as_float(self._get_state(entity_id))
+        primary_input_ages: dict[str, float | None] = {}
+        for key in ("temperature", "humidity"):
+            entity_id = room.get(key)
+            state = self.hass.states.get(entity_id) if entity_id else None
+            if state:
+                last_reported = getattr(state, "last_reported", state.last_updated)
+                primary_input_ages[key] = round(
+                    (dt_util.utcnow() - last_reported).total_seconds() / 60,
+                    1,
+                )
+            else:
+                primary_input_ages[key] = None
+        missing_inputs = [key for key in ("temperature", "humidity") if metrics.get(key) is None]
+        stale_inputs = [
+            key
+            for key, age in primary_input_ages.items()
+            if age is not None and age > MAX_PRIMARY_INPUT_AGE.total_seconds() / 60
+        ]
+        metrics["input_age_minutes"] = primary_input_ages
+        metrics["inputs_available"] = not missing_inputs and not stale_inputs
+        metrics["data_quality"] = (
+            "unavailable" if missing_inputs else "stale" if stale_inputs else "good"
+        )
         return metrics
 
     async def _async_send_notification(self, room: RoomResult, notification_type: str) -> None:
@@ -155,7 +217,8 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_process_notifications(self, rooms: dict[str, RoomResult]) -> None:
         cooldown_minutes = int(self.config.get(CONF_NOTIFICATION_COOLDOWN, 120))
         cooldown = timedelta(minutes=max(5, cooldown_minutes))
-        now = datetime.now().astimezone()
+        now = dt_util.now()
+        state_changed = False
 
         for room_id, room in rooms.items():
             if not room.notifications_enabled:
@@ -170,7 +233,9 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for notification_type, is_active in flags.items():
                 key = f"{room_id}:{notification_type}"
                 was_active = self.last_flag_state.get(key, False)
-                self.last_flag_state[key] = is_active
+                if self.last_flag_state.get(key) != is_active:
+                    self.last_flag_state[key] = is_active
+                    state_changed = True
 
                 if not is_active or was_active:
                     continue
@@ -181,6 +246,10 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 await self._async_send_notification(room, notification_type)
                 self.last_notification_at[key] = now
+                state_changed = True
+
+        if state_changed:
+            await self._async_save_notification_state()
 
     @staticmethod
     def _build_overview(
@@ -224,8 +293,9 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else:
                 actions.append("Aktuell besteht keine vorrangige Massnahme.")
 
-        scores = [room.score for room in rooms.values()]
-        worst_room = min(rooms.values(), key=lambda room: room.score, default=None)
+        scored_rooms = [room for room in rooms.values() if room.score is not None]
+        scores = [room.score for room in scored_rooms]
+        worst_room = min(scored_rooms, key=lambda room: room.score, default=None)
         return {
             "day_type": day_type,
             "icon": icon,

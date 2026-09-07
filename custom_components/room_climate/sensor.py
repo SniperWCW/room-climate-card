@@ -136,4 +136,6 @@ class RoomClimateRecommendationSensor(RoomClimateBaseSensor):
             "close_window_reason": self.room.close_window_reason,
             "close_cover": self.room.close_cover,
             "close_cover_reason": self.room.close_cover_reason,
+            "inputs_available": self.room.attributes.get("inputs_available"),
+            "data_quality": self.room.attributes.get("data_quality"),
         }
