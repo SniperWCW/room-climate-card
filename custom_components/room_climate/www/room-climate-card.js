@@ -196,6 +196,75 @@ class RoomClimateCard extends HTMLElement {
     `;
   }
 
+  getManagedHouseVentilation() {
+    const states = Object.values(this._hass?.states || {});
+    const current = states.find(
+      (stateObj) => stateObj?.attributes?.managed_by === "room_climate" && stateObj?.attributes?.house_ventilation === true
+    );
+    const nextWindow = states.find(
+      (stateObj) => stateObj?.attributes?.managed_by === "room_climate" && stateObj?.attributes?.ventilation_window === true
+    );
+    if (!current && !nextWindow) return null;
+
+    const currentAttrs = current?.attributes || {};
+    const windowAttrs = nextWindow?.attributes || {};
+    const numericAttribute = (value) => {
+      if (value === null || value === undefined || value === "") return null;
+      const number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    };
+    return {
+      title: current?.state || "Lüftung wird bewertet",
+      icon: currentAttrs.icon || currentAttrs.entity_picture || "mdi:air-filter",
+      color: currentAttrs.color || "blue",
+      reason: currentAttrs.reason || "",
+      insideHumidity: numericAttribute(currentAttrs.inside_absolute_humidity),
+      outsideHumidity: numericAttribute(currentAttrs.outside_absolute_humidity),
+      humidityDelta: numericAttribute(currentAttrs.humidity_delta),
+      duration: numericAttribute(currentAttrs.duration_minutes),
+      windowTitle: nextWindow?.state || "Kein Lüftungsfenster",
+      windowReason: windowAttrs.reason || "Wetterdaten werden aktualisiert.",
+      windowAvailable: windowAttrs.available === true,
+      expectedHumidity: numericAttribute(windowAttrs.expected_absolute_humidity),
+      expectedTemperature: numericAttribute(windowAttrs.expected_temperature),
+    };
+  }
+
+  managedHouseVentilationHtml() {
+    const ventilation = this.getManagedHouseVentilation();
+    if (!ventilation) return "";
+
+    const currentMetrics = [
+      ventilation.insideHumidity !== null ? `Innen ${ventilation.insideHumidity.toFixed(1)} g/m³` : "",
+      ventilation.outsideHumidity !== null ? `Außen ${ventilation.outsideHumidity.toFixed(1)} g/m³` : "",
+      ventilation.humidityDelta !== null ? `Differenz ${ventilation.humidityDelta.toFixed(1)} g/m³` : "",
+      ventilation.duration !== null ? `ca. ${ventilation.duration} Minuten` : "",
+    ].filter(Boolean).join(" · ");
+    const windowMetrics = [
+      ventilation.expectedHumidity !== null ? `${ventilation.expectedHumidity.toFixed(1)} g/m³` : "",
+      ventilation.expectedTemperature !== null ? `${ventilation.expectedTemperature.toFixed(1)} °C` : "",
+    ].filter(Boolean).join(" · ");
+
+    return `
+      <div class="house-ventilation">
+        <div class="house-advice house-advice--${ventilation.color}">
+          <ha-icon icon="${ventilation.icon}"></ha-icon>
+          <div>
+            <div class="house-advice-title">${ventilation.title}</div>
+            <div class="house-advice-detail">${currentMetrics || ventilation.reason}</div>
+          </div>
+        </div>
+        <div class="house-advice house-advice--window ${ventilation.windowAvailable ? "house-advice--available" : ""}">
+          <ha-icon icon="mdi:clock-check-outline"></ha-icon>
+          <div>
+            <div class="house-advice-title">${ventilation.windowTitle}</div>
+            <div class="house-advice-detail">${windowMetrics || ventilation.windowReason}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   getState(entity) {
     return entity && this._hass?.states?.[entity] ? this._hass.states[entity].state : null;
   }
@@ -1408,6 +1477,7 @@ class RoomClimateCard extends HTMLElement {
       <ha-card>
           <div class="content">
             <div class="title">Raumklima</div>
+            ${this.managedHouseVentilationHtml()}
             ${this.managedOverviewHtml()}
             ${Object.entries(groups)
             .map(
@@ -1450,6 +1520,7 @@ class RoomClimateCard extends HTMLElement {
         <ha-card>
           <div class="content">
             <div class="title">Raumklima</div>
+            ${this.managedHouseVentilationHtml()}
             ${this.managedOverviewHtml()}
             <div class="grid" style="grid-template-columns: repeat(${this.config.columns}, minmax(0, 1fr));">
               ${rooms.map((room) => this.managedRoomHtml(room)).join("")}
@@ -1486,6 +1557,30 @@ class RoomClimateCard extends HTMLElement {
       <style>
         .content { padding: 16px; }
         .title { font-size: 20px; font-weight: 700; margin-bottom: 14px; }
+        .house-ventilation {
+          display: grid;
+          gap: 10px;
+          margin: -2px 0 14px;
+        }
+        .house-advice {
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr);
+          gap: 12px;
+          align-items: center;
+          padding: 13px 14px;
+          border-radius: 16px;
+          border: 1px solid var(--divider-color);
+          background: color-mix(in srgb, var(--primary-color) 8%, var(--ha-card-background, var(--card-background-color)));
+        }
+        .house-advice ha-icon { color: var(--primary-color); --mdc-icon-size: 30px; }
+        .house-advice--green ha-icon { color: #43a047; }
+        .house-advice--amber ha-icon,
+        .house-advice--orange ha-icon { color: #fb8c00; }
+        .house-advice--blue ha-icon,
+        .house-advice--window ha-icon { color: #039be5; }
+        .house-advice--available ha-icon { color: #43a047; }
+        .house-advice-title { font-size: 16px; font-weight: 700; }
+        .house-advice-detail { margin-top: 3px; color: var(--secondary-text-color); line-height: 1.35; }
         .overview {
           margin: -2px 0 14px;
           padding: 12px;
