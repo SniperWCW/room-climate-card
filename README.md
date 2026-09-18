@@ -9,6 +9,8 @@ Features:
 - room climate scoring per room
 - separate advice for dehumidifying and cooling
 - hourly ventilation window forecast from `weather.*`
+- house-wide cross-ventilation and shock-ventilation recommendations
+- forecast windows evaluated from temperature and absolute humidity
 - house-wide daily briefing with weather-based day type and prioritised actions
 - optional `sun.sun` and window orientation handling
 - binary sensors for:
@@ -41,8 +43,12 @@ After installing or updating the integration, restart Home Assistant and reload 
 For the whole installation, the integration creates:
 
 - `sensor.room_climate_tageslage` (actual entity ID depends on your integration name)
+- `sensor.room_climate_hausluftung` with the current house-wide recommendation
+- `sensor.room_climate_nachstes_luftungsfenster` with the best forecast window
 
 The day briefing classifies the next 24 hours as a cool, mild, summer, or hot day. Its attributes contain the forecast range, average room score, most affected room, and a ready-to-use action summary for dashboards and automations. The bundled card displays this briefing automatically.
+
+The house-wide ventilation sensor combines the configured room windows and their orientations. Opposing orientations are used for cross-ventilation guidance. The forecast sensor calculates expected absolute humidity from hourly temperature and relative humidity and groups suitable hours into one recommended window. Both recommendations are also displayed as separate blocks in the bundled card.
 
 For each configured room, the integration creates:
 

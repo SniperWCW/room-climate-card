@@ -18,7 +18,11 @@ async def async_setup_entry(
 ) -> None:
     coordinator: RoomClimateCoordinator = hass.data[DOMAIN][entry.entry_id].coordinator
     rooms = coordinator.config.get("rooms", [])
-    entities: list[SensorEntity] = [RoomClimateOverviewSensor(coordinator, entry)]
+    entities: list[SensorEntity] = [
+        RoomClimateOverviewSensor(coordinator, entry),
+        RoomClimateHouseVentilationSensor(coordinator, entry),
+        RoomClimateNextVentilationWindowSensor(coordinator, entry),
+    ]
     for room in rooms:
         room_id = room["id"]
         entities.append(RoomClimateScoreSensor(coordinator, entry, room_id))
@@ -56,6 +60,74 @@ class RoomClimateOverviewSensor(CoordinatorEntity[RoomClimateCoordinator], Senso
             "name": "Room Climate",
             "manufacturer": "SniperWCW",
             "model": "Room Climate",
+        }
+
+
+class RoomClimateHouseBaseSensor(CoordinatorEntity[RoomClimateCoordinator], SensorEntity):
+    """Base class for house-wide Room Climate sensors."""
+
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator: RoomClimateCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self.entry = entry
+
+    @property
+    def ventilation(self):
+        return self.coordinator.data["house_ventilation"]
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self.entry.entry_id)},
+            "name": "Room Climate",
+            "manufacturer": "SniperWCW",
+            "model": "Room Climate",
+        }
+
+
+class RoomClimateHouseVentilationSensor(RoomClimateHouseBaseSensor):
+    """Expose the current house-wide ventilation recommendation."""
+
+    _attr_name = "Hauslüftung"
+
+    def __init__(self, coordinator: RoomClimateCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_house_ventilation"
+
+    @property
+    def native_value(self):
+        return self.ventilation.title
+
+    @property
+    def icon(self):
+        return self.ventilation.icon
+
+    @property
+    def extra_state_attributes(self):
+        return {"managed_by": DOMAIN, **self.ventilation.attributes()}
+
+
+class RoomClimateNextVentilationWindowSensor(RoomClimateHouseBaseSensor):
+    """Expose the best forecast ventilation window."""
+
+    _attr_name = "Nächstes Lüftungsfenster"
+    _attr_icon = "mdi:clock-check-outline"
+
+    def __init__(self, coordinator: RoomClimateCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_next_ventilation_window"
+
+    @property
+    def native_value(self):
+        return self.ventilation.next_window.label
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "managed_by": DOMAIN,
+            "ventilation_window": True,
+            **self.ventilation.next_window.attributes(),
         }
 
 

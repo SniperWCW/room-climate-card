@@ -26,6 +26,7 @@ from .const import (
     NOTIFICATION_CLOSE_WINDOW,
     NOTIFICATION_VENTILATE,
 )
+from .house_ventilation import evaluate_house_ventilation
 from .logic import RoomResult, as_float, evaluate_room
 
 _LOGGER = logging.getLogger(__name__)
@@ -328,9 +329,18 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         await self._async_process_notifications(room_results)
         overview = self._build_overview(room_results, outside_weather, forecast)
+        house_ventilation = evaluate_house_ventilation(
+            self.config.get(CONF_ROOMS, []),
+            room_results,
+            outside_abs,
+            outside_weather,
+            forecast,
+            now=dt_util.now(),
+        )
         return {
             "rooms": room_results,
             "overview": overview,
+            "house_ventilation": house_ventilation,
             "forecast": forecast,
             "outside_weather": outside_weather,
             "sun": sun,
