@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
@@ -7,6 +8,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -27,6 +29,7 @@ from .const import (
     NOTIFICATION_VENTILATE,
 )
 from .house_ventilation import evaluate_house_ventilation
+from .ventilation_session import update_sessions
 from .logic import RoomResult, as_float, evaluate_room
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,6 +49,12 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=DEFAULT_SCAN_INTERVAL,
         )
         self.entry = entry
+        self._sessions: dict[str, dict[str, Any]] = {}
+        self._session_store = Store[dict[str, dict[str, Any]]](
+            hass, 1, f"{DOMAIN}.{entry.entry_id}.ventilation_sessions"
+        )
+        self._forecast_cache: list[dict[str, Any]] = []
+        self._forecast_requested_at: datetime | None = None
         self.last_notification_at: dict[str, datetime] = {}
         self.last_flag_state: dict[str, bool] = {}
         self._notification_store = Store[dict[str, Any]](
@@ -73,7 +82,39 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_config_entry_first_refresh(self) -> None:
         """Load persisted state before calculating recommendations."""
         await self._async_restore_notification_state()
+        stored_sessions = await self._session_store.async_load()
+        self._sessions = stored_sessions if isinstance(stored_sessions, dict) else {}
         await super().async_config_entry_first_refresh()
+
+    def start_window_tracking(self) -> None:
+        """Refresh on contact transitions and every minute while windows are open."""
+        entities = {
+            room["window"]
+            for room in self.config.get(CONF_ROOMS, [])
+            if room.get("window")
+        }
+
+        async def window_changed(event) -> None:
+            old, new = event.data.get("old_state"), event.data.get("new_state")
+            if old is None or new is None or old.state != new.state:
+                await self.async_request_refresh()
+
+        async def session_tick(_now: datetime) -> None:
+            if self._sessions or any(
+                self._get_state(entity) in {"on", "open", "tilted"}
+                for entity in entities
+            ):
+                await self.async_request_refresh()
+
+        if entities:
+            self.entry.async_on_unload(
+                async_track_state_change_event(self.hass, entities, window_changed)
+            )
+            self.entry.async_on_unload(
+                async_track_time_interval(
+                    self.hass, session_tick, timedelta(minutes=1)
+                )
+            )
 
     async def _async_save_notification_state(self) -> None:
         await self._notification_store.async_save(
@@ -105,6 +146,14 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not entity_id:
             return []
 
+        now = dt_util.utcnow()
+        if (
+            self._forecast_requested_at
+            and now - self._forecast_requested_at < DEFAULT_SCAN_INTERVAL
+        ):
+            return self._forecast_cache
+        self._forecast_requested_at = now
+
         try:
             response = await self.hass.services.async_call(
                 "weather",
@@ -115,11 +164,13 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("Forecast lookup failed for %s: %s", entity_id, err)
+            self._forecast_cache = []
             return []
 
         payload = response.get(entity_id, {}) if isinstance(response, dict) else {}
         forecast = payload.get("forecast", []) if isinstance(payload, dict) else []
-        return forecast if isinstance(forecast, list) else []
+        self._forecast_cache = forecast if isinstance(forecast, list) else []
+        return self._forecast_cache
 
     def _collect_outside_weather(self) -> dict[str, Any]:
         entity_id = self.config.get(CONF_OUTSIDE_WEATHER)
@@ -337,6 +388,102 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             forecast,
             now=dt_util.now(),
         )
+        windows: dict[str, tuple[str, datetime]] = {}
+        for room in self.config.get(CONF_ROOMS, []):
+            entity_id = room.get("window")
+            if not entity_id:
+                continue
+            state = self.hass.states.get(entity_id)
+            windows[room["id"]] = (
+                state.state if state else "unknown",
+                state.last_changed if state else dt_util.utcnow(),
+            )
+
+        previous_sessions = deepcopy(self._sessions)
+        sessions = update_sessions(
+            self._sessions,
+            windows,
+            room_results,
+            dt_util.utcnow(),
+            house_ventilation.duration_minutes,
+            outside_weather.get("temperature"),
+        )
+        house_ventilation.sessions = sessions
+        finish = [session for session in sessions if session["phase"] == "finish"]
+        continued = [session for session in sessions if session["phase"] == "continue"]
+        if finish:
+            house_ventilation.mode = "close_windows"
+            house_ventilation.title = "Lüften beenden: " + ", ".join(session["room_name"] for session in finish)
+            house_ventilation.title = house_ventilation.title[:250]
+            house_ventilation.reason = " ".join(dict.fromkeys(session["reason"] for session in finish))
+            house_ventilation.icon = "mdi:window-closed-variant"
+            house_ventilation.color = "orange"
+            house_ventilation.duration_minutes = None
+            house_ventilation.session_phase = "finish"
+            house_ventilation.session_detail = house_ventilation.reason
+            house_ventilation.session_elapsed_minutes = round(
+                max(session["elapsed_minutes"] for session in finish)
+            )
+            house_ventilation.session_remaining_minutes = 0
+        elif continued:
+            remaining = min(session["remaining_minutes"] for session in continued)
+            elapsed = max(session["elapsed_minutes"] for session in continued)
+            house_ventilation.title = "Weiterlüften – Vorteil besteht noch"
+            house_ventilation.reason = (
+                "Die berechnete Mindestzeit ist erreicht. Feuchte- oder "
+                "Temperaturvorteil besteht weiterhin."
+            )
+            house_ventilation.session_phase = "continue"
+            house_ventilation.session_detail = (
+                f"Seit ca. {round(elapsed)} Min. geöffnet · spätestens in "
+                f"{remaining} Min. erneut schließen und prüfen"
+            )
+            house_ventilation.session_elapsed_minutes = round(elapsed)
+            house_ventilation.session_remaining_minutes = remaining
+        elif sessions:
+            remaining = min(session["remaining_minutes"] for session in sessions)
+            elapsed = max(session["elapsed_minutes"] for session in sessions)
+            unavailable = any(
+                session["data_quality"] == "unavailable" for session in sessions
+            )
+            if unavailable:
+                house_ventilation.mode = "ventilation_active_limited"
+                house_ventilation.title = (
+                    f"Lüftung läuft · noch max. {remaining} Min."
+                )
+                house_ventilation.reason = (
+                    "Aktuelle Raumwerte fehlen. Nach der berechneten Zeit "
+                    "Fenster schließen und Werte prüfen."
+                )
+                house_ventilation.icon = "mdi:window-open-variant"
+                house_ventilation.color = "amber"
+            elif house_ventilation.mode not in {
+                "cross_ventilation_active",
+                "ventilation_active",
+            }:
+                house_ventilation.mode = "ventilation_active"
+                house_ventilation.title = "Lüften aktiv"
+                house_ventilation.icon = "mdi:window-open-variant"
+                house_ventilation.color = "green"
+            else:
+                house_ventilation.title = house_ventilation.title.replace(
+                    " (maximaler Luftaustausch)", ""
+                )
+            if not unavailable:
+                house_ventilation.title += f" · noch ca. {remaining} Min."
+            house_ventilation.session_phase = "active"
+            house_ventilation.session_detail = (
+                f"Seit ca. {round(elapsed)} Min. geöffnet · Raumwerte fehlen"
+                if unavailable
+                else (
+                    f"Seit ca. {round(elapsed)} Min. geöffnet · laufende "
+                    "Empfehlung anhand der aktuellen Raumwerte"
+                )
+            )
+            house_ventilation.session_elapsed_minutes = round(elapsed)
+            house_ventilation.session_remaining_minutes = remaining
+        if previous_sessions != self._sessions:
+            await self._session_store.async_save(self._sessions)
         return {
             "rooms": room_results,
             "overview": overview,

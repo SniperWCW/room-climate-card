@@ -10,6 +10,8 @@ Features:
 - separate advice for dehumidifying and cooling
 - hourly ventilation window forecast from `weather.*`
 - house-wide cross-ventilation and shock-ventilation recommendations
+- immediate updates when a configured window contact changes
+- restart-safe ventilation countdown with continued-benefit and close-window guidance
 - forecast windows evaluated from temperature and absolute humidity
 - house-wide daily briefing with weather-based day type and prioritised actions
 - optional `sun.sun` and window orientation handling
@@ -48,7 +50,7 @@ For the whole installation, the integration creates:
 
 The day briefing classifies the next 24 hours as a cool, mild, summer, or hot day. Its attributes contain the forecast range, average room score, most affected room, and a ready-to-use action summary for dashboards and automations. The bundled card displays this briefing automatically.
 
-The house-wide ventilation sensor combines the configured room windows and their orientations. Opposing orientations are used for cross-ventilation guidance. The forecast sensor calculates expected absolute humidity from hourly temperature and relative humidity and groups suitable hours into one recommended window. Both recommendations are also displayed as separate blocks in the bundled card.
+The house-wide ventilation sensor combines the configured room windows and their orientations. Opposing orientations are used for cross-ventilation guidance. When a window opens, its state updates immediately and a restart-safe countdown begins. Current room values are checked throughout the session, so the recommendation changes to `Lüften beenden` as soon as the outside-air advantage ends. If the advantage still exists after the calculated minimum time, it changes to `Weiterlüften`. A maximum of 10 minutes in cold weather and 20 minutes otherwise prevents an open-ended recommendation. The forecast sensor calculates expected absolute humidity from hourly temperature and relative humidity and groups suitable hours into one recommended window. Both recommendations are also displayed as separate blocks in the bundled card.
 
 For each configured room, the integration creates:
 
@@ -63,5 +65,5 @@ For each configured room, the integration creates:
 - Push notifications are sent only when the recommendation changes from inactive to active.
 - A configurable cooldown prevents repeated notifications.
 - The `Score` exposes `inputs_available` and `data_quality`. A score is only calculated when current room temperature and humidity readings are available; source readings older than 15 minutes are marked `stale`.
-- The integration updates every five minutes. Use its values as climate context and recommendations, not as a real-time activity signal.
+- Regular calculations run every five minutes. Window changes trigger an immediate refresh, and an active ventilation session refreshes once per minute.
 - The bundled Lovelace card is still useful for rich per-room display, while the integration handles backend logic and automation-friendly entities.

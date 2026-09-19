@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 import math
 from typing import Any, Iterable
@@ -165,6 +165,11 @@ class HouseVentilationResult:
     cross_ventilation_available: bool
     data_quality: str
     next_window: ForecastWindow
+    sessions: list[dict[str, Any]] = field(default_factory=list)
+    session_phase: str | None = None
+    session_detail: str | None = None
+    session_elapsed_minutes: int | None = None
+    session_remaining_minutes: int | None = None
 
     def attributes(self) -> dict[str, Any]:
         attributes = asdict(self)

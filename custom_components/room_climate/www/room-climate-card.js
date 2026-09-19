@@ -222,6 +222,7 @@ class RoomClimateCard extends HTMLElement {
       outsideHumidity: numericAttribute(currentAttrs.outside_absolute_humidity),
       humidityDelta: numericAttribute(currentAttrs.humidity_delta),
       duration: numericAttribute(currentAttrs.duration_minutes),
+      sessionDetail: currentAttrs.session_detail || "",
       windowTitle: nextWindow?.state || "Kein Lüftungsfenster",
       windowReason: windowAttrs.reason || "Wetterdaten werden aktualisiert.",
       windowAvailable: windowAttrs.available === true,
@@ -252,6 +253,7 @@ class RoomClimateCard extends HTMLElement {
           <div>
             <div class="house-advice-title">${ventilation.title}</div>
             <div class="house-advice-detail">${currentMetrics || ventilation.reason}</div>
+            ${ventilation.sessionDetail ? `<div class="house-advice-session">${ventilation.sessionDetail}</div>` : ""}
           </div>
         </div>
         <div class="house-advice house-advice--window ${ventilation.windowAvailable ? "house-advice--available" : ""}">
@@ -1580,7 +1582,10 @@ class RoomClimateCard extends HTMLElement {
         .house-advice--window ha-icon { color: #039be5; }
         .house-advice--available ha-icon { color: #43a047; }
         .house-advice-title { font-size: 16px; font-weight: 700; }
+        .house-advice > div { min-width: 0; }
+        .house-advice-title, .house-advice-detail { white-space: normal; overflow-wrap: anywhere; }
         .house-advice-detail { margin-top: 3px; color: var(--secondary-text-color); line-height: 1.35; }
+        .house-advice-session { margin-top: 3px; color: var(--secondary-text-color); font-size: 12px; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; }
         .overview {
           margin: -2px 0 14px;
           padding: 12px;
