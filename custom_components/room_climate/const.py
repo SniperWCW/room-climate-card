@@ -34,9 +34,10 @@ DEFAULT_NOTIFICATION_ENABLED = True
 DEFAULT_NOTIFICATION_COOLDOWN = 120
 DEFAULT_UPDATE_MINUTES = 5
 DEFAULT_SCAN_INTERVAL = timedelta(minutes=DEFAULT_UPDATE_MINUTES)
-# A primary room reading may be one coordinator cycle behind, but must not look
-# current indefinitely when its source entity stops updating.
-MAX_PRIMARY_INPUT_AGE = timedelta(minutes=15)
+# Some battery-powered sensors only report again after a value changes. Allow
+# stable readings to remain usable while still detecting sensors that have
+# stopped reporting for an extended period.
+MAX_PRIMARY_INPUT_AGE = timedelta(hours=3)
 
 CARD_FILENAME = "room-climate-card.js"
 CARD_URL_PATH = f"/room-climate/{CARD_FILENAME}"
