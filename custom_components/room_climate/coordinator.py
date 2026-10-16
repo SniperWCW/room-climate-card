@@ -105,7 +105,7 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._forecast_cache: list[dict[str, Any]] = []
         self._forecast_requested_at: datetime | None = None
         self._forecast_retry_unsub = None
-        self._climate_entity_cache: dict[str, str | None] = {}
+        self._climate_entity_cache: dict[str, list[str]] = {}
         self._mold_since: dict[str, datetime] = {}
         entry.async_on_unload(self._cancel_forecast_retry)
         self.last_notification_at: dict[str, datetime] = {}
@@ -274,15 +274,8 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._forecast_retry_unsub()
             self._forecast_retry_unsub = None
 
-    def _resolve_climate_entity(self, room: dict[str, Any]) -> str | None:
-        """Return the room's thermostat.
-
-        Rooms configured before thermostats were supported have no "climate"
-        key; for them the thermostat in the same area as the temperature sensor
-        is used. An explicit empty value means "no thermostat".
-        """
-        if CONF_CLIMATE in room:
-            return room.get(CONF_CLIMATE) or None
+    def _climate_candidates(self, room: dict[str, Any]) -> list[str]:
+        """All thermostats in the area of the room's temperature sensor (cached)."""
         room_id = room.get("id", "")
         if room_id in self._climate_entity_cache:
             return self._climate_entity_cache[room_id]
@@ -299,30 +292,46 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return device.area_id if device else None
 
         area_id = area_of(room.get("temperature"))
-        found = None
+        candidates: list[str] = []
         if area_id:
-            found = next(
-                (
-                    entry.entity_id
-                    for entry in er.async_entries_for_area(entity_registry, area_id)
-                    if entry.domain == "climate" and not entry.disabled_by
-                ),
-                None,
-            )
-            if found is None:
-                for device in dr.async_entries_for_area(device_registry, area_id):
-                    found = next(
-                        (
-                            entry.entity_id
-                            for entry in er.async_entries_for_device(entity_registry, device.id)
-                            if entry.domain == "climate" and not entry.disabled_by
-                        ),
-                        None,
-                    )
-                    if found:
-                        break
-        self._climate_entity_cache[room_id] = found
-        return found
+            for entry in list(entity_registry.entities.values()):
+                if entry.domain != "climate" or entry.disabled_by:
+                    continue
+                if area_of(entry.entity_id) == area_id:
+                    candidates.append(entry.entity_id)
+        self._climate_entity_cache[room_id] = candidates
+        return candidates
+
+    def _resolve_climate_entity(self, room: dict[str, Any]) -> str | None:
+        """Return the room's thermostat.
+
+        Rooms configured before thermostats were supported have no "climate"
+        key; for them a thermostat in the same area as the temperature sensor
+        is used. An explicit empty value means "no thermostat".
+
+        Areas often contain several climate entities (a thermostat group, a
+        scheduler entity on top of it, an air conditioner). Only entities that
+        can heat are considered, and the one with the highest current setpoint
+        wins: a group held at frost protection by a scheduler loses against the
+        scheduler entity that carries the real target temperature.
+        """
+        if CONF_CLIMATE in room:
+            return room.get(CONF_CLIMATE) or None
+
+        best: str | None = None
+        best_target = -1.0
+        for entity_id in self._climate_candidates(room):
+            state = self.hass.states.get(entity_id)
+            if state is None or state.state in {"unavailable", "unknown"}:
+                continue
+            modes = state.attributes.get("hvac_modes") or []
+            if not any(mode in {"heat", "heat_cool"} for mode in modes):
+                continue
+            target = as_float(state.attributes.get("temperature"))
+            target = target if target is not None else 0.0
+            if target > best_target:
+                best, best_target = entity_id, target
+        return best
 
     def _collect_outside_weather(self) -> dict[str, Any]:
         entity_id = self.config.get(CONF_OUTSIDE_WEATHER)

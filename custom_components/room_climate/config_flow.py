@@ -172,6 +172,26 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
             "",
         )
 
+    def find_heating_thermostat(area_id: str) -> str:
+        """Prefer a heating thermostat with a real setpoint over groups at frost protection."""
+        best, best_target = "", -1.0
+        for entity_id in entities_by_area.get(area_id, []):
+            if not entity_id.startswith("climate."):
+                continue
+            state = hass.states.get(entity_id)
+            if state is None:
+                continue
+            modes = state.attributes.get("hvac_modes") or []
+            if not any(mode in {"heat", "heat_cool"} for mode in modes):
+                continue
+            try:
+                target = float(state.attributes.get("temperature"))
+            except (TypeError, ValueError):
+                target = 0.0
+            if target > best_target:
+                best, best_target = entity_id, target
+        return best
+
     def find_by_device_class(area_id: str, device_class: str, units: set[str]) -> str:
         for entity_id in entities_by_area.get(area_id, []):
             if not entity_id.startswith("sensor."):
@@ -263,7 +283,7 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
             or find_entity_for_area(area.id, ("rollerladen",), ("cover",))
             or find_entity_for_area(area.id, ("shade",), ("cover",))
         )
-        room[CONF_CLIMATE] = room[CONF_CLIMATE] or find_entity_for_area(area.id, (), ("climate",))
+        room[CONF_CLIMATE] = room[CONF_CLIMATE] or find_heating_thermostat(area.id)
         room[CONF_HUMIDEX_VALUE] = room[CONF_HUMIDEX_VALUE] or find_entity_for_area(area.id, ("thermal_comfort", "humidex"))
         room[CONF_SCHARLAU] = room[CONF_SCHARLAU] or find_entity_for_area(area.id, ("thermal_comfort", "sommer_scharlau_gefuhlt"))
         room[CONF_HUMIDEX] = room[CONF_HUMIDEX] or find_entity_for_area(area.id, ("thermal_comfort", "humidex_gefuhlt"))

@@ -117,3 +117,39 @@ async def test_mold_risk_needs_to_persist_before_it_is_reported(hass, web_stack,
 
     assert await hass.config_entries.async_unload(config_entry.entry_id)
     await hass.async_block_till_done()
+
+
+async def test_thermostat_auto_detection_prefers_real_setpoint(hass, web_stack, config_entry):
+    """Rooms without a configured thermostat pick the heating entity with the real setpoint.
+
+    Regression: a thermostat group held at 5 °C by a scheduler was chosen instead
+    of the scheduler entity (22 °C); an air conditioner must never be chosen.
+    """
+    from homeassistant.helpers import area_registry as ar
+
+    rooms = [dict(config_entry.data["rooms"][0])]
+    rooms[0].pop("climate")
+    hass.config_entries.async_update_entry(config_entry, data={**config_entry.data, "rooms": rooms})
+
+    area = ar.async_get(hass).async_create("Wohnzimmer")
+    registry = er.async_get(hass)
+    for object_id in ("wohnzimmer_temperatur", "trv_gruppe", "wohnzimmer_heizung", "klima"):
+        domain = "sensor" if object_id.endswith("temperatur") else "climate"
+        entry = registry.async_get_or_create(domain, "test", object_id, suggested_object_id=object_id)
+        registry.async_update_entity(entry.entity_id, area_id=area.id)
+
+    set_room_states(hass)
+    set_weather(hass)
+    hass.states.async_set("climate.trv_gruppe", "heat", {"hvac_modes": ["auto", "heat", "off"], "temperature": 5})
+    hass.states.async_set("climate.wohnzimmer_heizung", "heat", {"hvac_modes": ["heat", "off"], "temperature": 22, "hvac_action": "idle"})
+    hass.states.async_set("climate.klima", "off", {"hvac_modes": ["off", "auto", "cool"], "temperature": 24})
+
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    score = hass.states.get(_entity_id(hass, "sensor", "wohnzimmer_score", config_entry))
+    assert score.attributes["climate_entity"] == "climate.wohnzimmer_heizung"
+    assert score.attributes["heating_enabled"] is True
+
+    assert await hass.config_entries.async_unload(config_entry.entry_id)
+    await hass.async_block_till_done()
