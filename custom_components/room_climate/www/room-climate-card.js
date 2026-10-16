@@ -23,6 +23,7 @@ class RoomClimateCard extends HTMLElement {
   }
 
   setConfig(config) {
+    this._forceRender = true;
     this.config = {
       mode: "detailed",
       columns: 2,
@@ -36,12 +37,57 @@ class RoomClimateCard extends HTMLElement {
     };
 
     this.ensureOutsideForecast();
+    if (this._hass) this.scheduleRender();
   }
 
   set hass(hass) {
+    const previous = this._hass;
     this._hass = hass;
     this.ensureOutsideForecast();
+    // Home Assistant pushes a new hass object for every state change in the
+    // whole installation. Only re-render when one of our entities changed.
+    if (
+      previous &&
+      !this._forceRender &&
+      !this.isLegacyConfig() &&
+      !this.hasRelevantChange(previous, hass)
+    ) {
+      return;
+    }
+    this._forceRender = false;
+    this.getRelevantEntityIds(hass);
     this.scheduleRender();
+  }
+
+  getRelevantEntityIds(hass) {
+    const states = hass?.states || {};
+    const count = Object.keys(states).length;
+    if (!this._relevantEntityIds || this._relevantStatesCount !== count) {
+      this._relevantStatesCount = count;
+      this._relevantEntityIds = Object.entries(states)
+        .filter(([entityId, stateObj]) =>
+          stateObj?.attributes?.managed_by === "room_climate" || this.isManagedScoreEntity(entityId, stateObj)
+        )
+        .map(([entityId]) => entityId);
+    }
+    return this._relevantEntityIds;
+  }
+
+  hasRelevantChange(previous, next) {
+    if (previous.states === next.states) return false;
+    const previousCount = this._relevantStatesCount;
+    const ids = this.getRelevantEntityIds(next);
+    if (previousCount !== this._relevantStatesCount) return true;
+    return ids.some((entityId) => previous.states?.[entityId] !== next.states?.[entityId]);
+  }
+
+  escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   disconnectedCallback() {
@@ -62,9 +108,12 @@ class RoomClimateCard extends HTMLElement {
   }
 
   isManagedScoreEntity(entityId, stateObj) {
-    if (!entityId.startsWith("sensor.") || !entityId.endsWith("_score")) return false;
+    if (!entityId.startsWith("sensor.")) return false;
     const attrs = stateObj?.attributes || {};
-    if (attrs.managed_by === "room_climate") return true;
+    // Score sensors are recognised by their attributes, so renamed entity IDs
+    // keep working. The recommendation sensor has no level_class attribute.
+    if (attrs.managed_by === "room_climate") return "level_class" in attrs;
+    if (!entityId.endsWith("_score")) return false;
 
     return Boolean(
       attrs.room_type ||
@@ -117,7 +166,9 @@ class RoomClimateCard extends HTMLElement {
   getManagedRooms() {
     return this.getManagedScoreEntities().map(([entityId, stateObj]) => {
       const attrs = stateObj?.attributes || {};
-      const score = Number(stateObj?.state);
+      const rawScore = stateObj?.state;
+      const score = rawScore === null || rawScore === undefined || rawScore === "" ? NaN : Number(rawScore);
+      const esc = (value) => this.escapeHtml(value);
       const roomType = attrs.room_type || "default";
       const temperature = Number(attrs.temperature);
       const humidity = Number(attrs.humidity);
@@ -126,33 +177,39 @@ class RoomClimateCard extends HTMLElement {
       const windowKnown = typeof attrs.window_open === "boolean";
       const windowText = windowKnown ? (attrs.window_open ? "offen" : "geschlossen") : "kein Sensor";
       const level = {
-        label: attrs.level || "Unbekannt",
-        icon: attrs.level_icon || "ℹ️",
-        cls: attrs.level_class ? `rc-${attrs.level_class}` : "rc-medium",
+        label: esc(attrs.level || "Unbekannt"),
+        icon: esc(attrs.level_icon || "ℹ️"),
+        cls: attrs.level_class ? `rc-${esc(attrs.level_class)}` : "rc-medium",
+        rank: attrs.level_class || "unknown",
       };
+      const hasScore = Number.isFinite(score);
 
       return {
         entityId,
-        name: this.getManagedRoomName(entityId, stateObj),
-        score: Number.isFinite(score) ? score : 0,
+        name: esc(this.getManagedRoomName(entityId, stateObj)),
+        score: hasScore ? score : 0,
+        scoreText: hasScore ? String(score) : "–",
+        hasScore,
         level,
-        description: attrs.description || "Keine Beschreibung verfuegbar",
-        dehumidifyAdvice: attrs.dehumidify_advice || "",
-        coolingAdvice: attrs.cooling_advice || "",
-        recommendation: attrs.recommendation || "",
-        nextWindow: attrs.next_ventilation_window || "",
+        description: esc(attrs.description || "Keine Beschreibung verfügbar"),
+        dehumidifyAdvice: esc(attrs.dehumidify_advice || ""),
+        coolingAdvice: esc(attrs.cooling_advice || ""),
+        dehumidifyLevel: attrs.dehumidify_level || null,
+        coolingLevel: attrs.cooling_level || null,
+        recommendation: esc(attrs.recommendation || ""),
+        nextWindow: esc(attrs.next_ventilation_window || ""),
         temperature: Number.isFinite(temperature) ? temperature : null,
         humidity: Number.isFinite(humidity) ? humidity : null,
         humidexValue: Number.isFinite(humidexValue) ? humidexValue : null,
         simmerText: this.getSimmerText(attrs.simmer_felt ?? null),
-        orientationLabel: attrs.window_orientation || null,
-        solarExposure: attrs.solar_exposure || "kein relevanter Sonneneintrag",
-        windEffect: attrs.wind_effect || "",
+        orientationLabel: attrs.window_orientation ? esc(attrs.window_orientation) : null,
+        solarExposure: esc(attrs.solar_exposure || "kein relevanter Sonneneintrag"),
+        windEffect: esc(attrs.wind_effect || ""),
         windowText,
         closeWindow: attrs.close_window === true,
-        closeWindowReason: attrs.close_window_reason || "",
+        closeWindowReason: esc(attrs.close_window_reason || ""),
         closeCover: attrs.close_cover === true,
-        closeCoverReason: attrs.close_cover_reason || "",
+        closeCoverReason: esc(attrs.close_cover_reason || ""),
         roomType,
         profile,
       };
@@ -167,12 +224,12 @@ class RoomClimateCard extends HTMLElement {
 
     const attrs = overview.attributes || {};
     return {
-      dayType: attrs.day_type || overview.state,
-      summary: attrs.summary || "",
+      dayType: this.escapeHtml(attrs.day_type || overview.state),
+      summary: this.escapeHtml(attrs.summary || ""),
       high: Number.isFinite(Number(attrs.forecast_high)) ? Number(attrs.forecast_high) : null,
       low: Number.isFinite(Number(attrs.forecast_low)) ? Number(attrs.forecast_low) : null,
       averageScore: Number.isFinite(Number(attrs.average_score)) ? Number(attrs.average_score) : null,
-      worstRoom: attrs.worst_room || "",
+      worstRoom: this.escapeHtml(attrs.worst_room || ""),
       worstRoomScore: Number.isFinite(Number(attrs.worst_room_score)) ? Number(attrs.worst_room_score) : null,
     };
   }
@@ -182,8 +239,8 @@ class RoomClimateCard extends HTMLElement {
     if (!overview) return "";
 
     const forecast = overview.high !== null
-      ? `Heute ${overview.low?.toFixed(0) ?? "-"} bis ${overview.high.toFixed(0)} C`
-      : "Wetterprognose nicht verfuegbar";
+      ? `Heute ${overview.low?.toFixed(0) ?? "-"} bis ${overview.high.toFixed(0)} °C`
+      : "Wetterprognose nicht verfügbar";
     const roomStatus = overview.averageScore !== null
       ? `Durchschnitt ${overview.averageScore}/100${overview.worstRoom ? ` · Niedrigster Wert: ${overview.worstRoom} (${overview.worstRoomScore}/100)` : ""}`
       : "";
@@ -213,18 +270,19 @@ class RoomClimateCard extends HTMLElement {
       const number = Number(value);
       return Number.isFinite(number) ? number : null;
     };
+    const esc = (value) => this.escapeHtml(value);
     return {
-      title: current?.state || "Lüftung wird bewertet",
-      icon: currentAttrs.icon || currentAttrs.entity_picture || "mdi:air-filter",
-      color: currentAttrs.color || "blue",
-      reason: currentAttrs.reason || "",
+      title: esc(current?.state || "Lüftung wird bewertet"),
+      icon: esc(currentAttrs.icon || currentAttrs.entity_picture || "mdi:air-filter"),
+      color: esc(currentAttrs.color || "blue"),
+      reason: esc(currentAttrs.reason || ""),
       insideHumidity: numericAttribute(currentAttrs.inside_absolute_humidity),
       outsideHumidity: numericAttribute(currentAttrs.outside_absolute_humidity),
       humidityDelta: numericAttribute(currentAttrs.humidity_delta),
       duration: numericAttribute(currentAttrs.duration_minutes),
-      sessionDetail: currentAttrs.session_detail || "",
-      windowTitle: nextWindow?.state || "Kein Lüftungsfenster",
-      windowReason: windowAttrs.reason || "Wetterdaten werden aktualisiert.",
+      sessionDetail: esc(currentAttrs.session_detail || ""),
+      windowTitle: esc(nextWindow?.state || "Kein Lüftungsfenster"),
+      windowReason: esc(windowAttrs.reason || "Wetterdaten werden aktualisiert."),
       windowAvailable: windowAttrs.available === true,
       expectedHumidity: numericAttribute(windowAttrs.expected_absolute_humidity),
       expectedTemperature: numericAttribute(windowAttrs.expected_temperature),
@@ -1398,16 +1456,21 @@ class RoomClimateCard extends HTMLElement {
 
   managedRoomHtml(room) {
     const actionHints = [
-      room.closeWindow && room.closeWindowReason ? `<div><b>Fenster schliessen:</b> ${room.closeWindowReason}</div>` : "",
-      room.closeCover && room.closeCoverReason ? `<div><b>Rollladen schliessen:</b> ${room.closeCoverReason}</div>` : "",
+      room.closeWindow && room.closeWindowReason ? `<div><b>Fenster schließen:</b> ${room.closeWindowReason}</div>` : "",
+      room.closeCover && room.closeCoverReason ? `<div><b>Rollladen schließen:</b> ${room.closeCoverReason}</div>` : "",
     ].filter(Boolean);
-    const ventilationClass =
-      room.dehumidifyAdvice || room.coolingAdvice
-        ? room.dehumidifyAdvice.includes("offen") || room.coolingAdvice.includes("offen")
-          ? "vent-open"
-          : room.dehumidifyAdvice.includes("sinnvoll")
-            ? "vent-recommended"
-            : "vent-none"
+    // Use the advice levels from the integration instead of matching words in
+    // the text ("nicht sinnvoll" previously matched "sinnvoll").
+    const levels = [room.dehumidifyLevel, room.coolingLevel];
+    const legacyText = `${room.dehumidifyAdvice} ${room.coolingAdvice}`;
+    const ventilationClass = levels.some(Boolean)
+      ? levels.includes("open")
+        ? "vent-open"
+        : levels.some((level) => ["recommended", "short", "cooling"].includes(level))
+          ? "vent-recommended"
+          : "vent-none"
+      : legacyText.includes("offen")
+        ? "vent-open"
         : "vent-none";
 
     if (this.config.mode === "compact") {
@@ -1418,15 +1481,15 @@ class RoomClimateCard extends HTMLElement {
               <div class="name">${room.level.icon} ${room.name}</div>
               <div class="sub">${room.level.label}</div>
             </div>
-            <div class="score">${room.score}</div>
+            <div class="score">${room.scoreText ?? room.score}</div>
           </div>
           <div class="metrics">
-            <span>Temperatur ${room.temperature?.toFixed(1) ?? "-"} C</span>
+            <span>Temperatur ${room.temperature?.toFixed(1) ?? "-"} °C</span>
             <span>Luftfeuchtigkeit ${room.humidity?.toFixed(0) ?? "-"} %</span>
             ${room.dehumidifyAdvice ? `<span>Entfeuchtung ${room.dehumidifyAdvice}</span>` : ""}
             ${room.coolingAdvice ? `<span>Abkühlung ${room.coolingAdvice}</span>` : ""}
-            ${room.closeWindow && room.closeWindowReason ? `<span>Fenster schliessen ${room.closeWindowReason}</span>` : ""}
-            ${room.closeCover && room.closeCoverReason ? `<span>Rollladen schliessen ${room.closeCoverReason}</span>` : ""}
+            ${room.closeWindow && room.closeWindowReason ? `<span>Fenster schließen ${room.closeWindowReason}</span>` : ""}
+            ${room.closeCover && room.closeCoverReason ? `<span>Rollladen schließen ${room.closeCoverReason}</span>` : ""}
           </div>
         </div>
       `;
@@ -1437,9 +1500,9 @@ class RoomClimateCard extends HTMLElement {
         <div class="top">
           <div>
             <div class="name">${room.level.icon} ${room.name}</div>
-            <div class="sub">Raumklima: ${room.score}/100 · ${room.level.label}</div>
+            <div class="sub">Raumklima: ${room.scoreText ?? room.score}/100 · ${room.level.label}</div>
           </div>
-          <div class="score">${room.score}</div>
+          <div class="score">${room.scoreText ?? room.score}</div>
         </div>
 
         <div class="text">${room.description}</div>
@@ -1469,7 +1532,11 @@ class RoomClimateCard extends HTMLElement {
   managedGroupedHtml() {
     const groups = {};
 
-    this.getManagedRooms().forEach((room) => {
+    const severity = ["critical", "bad", "warning", "unknown", "medium", "good", "excellent"];
+    const rooms = this.getManagedRooms().sort(
+      (a, b) => severity.indexOf(a.level.rank) - severity.indexOf(b.level.rank)
+    );
+    rooms.forEach((room) => {
       const key = `${room.level.icon} ${room.level.label}`;
       groups[key] ??= [];
       groups[key].push(room);
@@ -1492,7 +1559,7 @@ class RoomClimateCard extends HTMLElement {
                         <div class="group-row">
                           <span>${room.name}</span>
                           <span>${[room.recommendation || "Keine Empfehlung", room.closeWindowReason, room.closeCoverReason].filter(Boolean).join(" · ")}</span>
-                          <b>${room.score}/100</b>
+                          <b>${room.scoreText ?? room.score}/100</b>
                         </div>
                       `
                     )
@@ -1955,9 +2022,12 @@ class RoomClimateCardEditor extends HTMLElement {
   }
 
   isManagedScoreEntity(entityId, stateObj) {
-    if (!entityId.startsWith("sensor.") || !entityId.endsWith("_score")) return false;
+    if (!entityId.startsWith("sensor.")) return false;
     const attrs = stateObj?.attributes || {};
-    if (attrs.managed_by === "room_climate") return true;
+    // Score sensors are recognised by their attributes, so renamed entity IDs
+    // keep working. The recommendation sensor has no level_class attribute.
+    if (attrs.managed_by === "room_climate") return "level_class" in attrs;
+    if (!entityId.endsWith("_score")) return false;
 
     return Boolean(
       attrs.room_type ||

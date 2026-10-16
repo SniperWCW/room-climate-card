@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Room Climate einrichten",
-        "description": "Globale Entitaeten und Push-Einstellungen fuer Room Climate."
+        "description": "Globale Entitäten und Push-Einstellungen für Room Climate."
       }
     },
     "error": {},
@@ -21,13 +21,13 @@
         "title": "Globale Einstellungen"
       },
       "import_detected_rooms": {
-        "title": "Raeume aus Home Assistant auswaehlen"
+        "title": "Räume aus Home Assistant auswählen"
       },
       "add_room_manual": {
-        "title": "Raum manuell hinzufuegen"
+        "title": "Raum manuell hinzufügen"
       },
       "edit_room_select": {
-        "title": "Raum auswaehlen"
+        "title": "Raum auswählen"
       },
       "edit_room": {
         "title": "Raum bearbeiten"

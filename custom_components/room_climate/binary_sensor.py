@@ -22,9 +22,9 @@ async def async_setup_entry(
         room_id = room["id"]
         entities.extend(
             [
-                RoomClimateFlagSensor(coordinator, entry, room_id, "ventilate_now", "Lueften jetzt", "mdi:window-open-variant"),
-                RoomClimateFlagSensor(coordinator, entry, room_id, "close_window", "Fenster schliessen", "mdi:window-closed-variant"),
-                RoomClimateFlagSensor(coordinator, entry, room_id, "close_cover", "Rollladen schliessen", "mdi:roller-shade-closed"),
+                RoomClimateFlagSensor(coordinator, entry, room_id, "ventilate_now", "Lüften jetzt", "mdi:window-open-variant"),
+                RoomClimateFlagSensor(coordinator, entry, room_id, "close_window", "Fenster schließen", "mdi:window-closed-variant"),
+                RoomClimateFlagSensor(coordinator, entry, room_id, "close_cover", "Rollladen schließen", "mdi:roller-shade-closed"),
             ]
         )
     async_add_entities(entities)
@@ -32,6 +32,9 @@ async def async_setup_entry(
 
 class RoomClimateFlagSensor(CoordinatorEntity[RoomClimateCoordinator], BinarySensorEntity):
     _attr_has_entity_name = True
+    _unrecorded_attributes = frozenset(
+        {"recommendation", "next_ventilation_window", "description", "close_window_reason", "close_cover_reason"}
+    )
 
     def __init__(
         self,

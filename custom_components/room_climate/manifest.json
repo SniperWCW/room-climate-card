@@ -1,12 +1,21 @@
 {
   "domain": "room_climate",
   "name": "Room Climate",
-  "codeowners": ["@SniperWCW"],
+  "codeowners": [
+    "@SniperWCW"
+  ],
   "config_flow": true,
+  "dependencies": [
+    "frontend",
+    "http"
+  ],
   "documentation": "https://github.com/SniperWCW/room-climate-card",
   "integration_type": "service",
-  "iot_class": "local_polling",
+  "iot_class": "calculated",
   "issue_tracker": "https://github.com/SniperWCW/room-climate-card/issues",
-  "loggers": ["custom_components.room_climate"],
-  "version": "0.2.24"
+  "loggers": [
+    "custom_components.room_climate"
+  ],
+  "single_config_entry": true,
+  "version": "0.3.0"
 }

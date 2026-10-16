@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE
 from homeassistant.core import HomeAssistant
@@ -90,6 +90,10 @@ class RoomClimateHouseVentilationSensor(RoomClimateHouseBaseSensor):
     """Expose the current house-wide ventilation recommendation."""
 
     _attr_name = "Hauslüftung"
+    # Large, frequently changing attributes stay out of the recorder database.
+    _unrecorded_attributes = frozenset(
+        {"sessions", "next_window", "session_detail", "session_elapsed_minutes", "session_remaining_minutes"}
+    )
 
     def __init__(self, coordinator: RoomClimateCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
@@ -105,7 +109,11 @@ class RoomClimateHouseVentilationSensor(RoomClimateHouseBaseSensor):
 
     @property
     def extra_state_attributes(self):
-        return {"managed_by": DOMAIN, **self.ventilation.attributes()}
+        return {
+            "managed_by": DOMAIN,
+            "title": self.ventilation.title,
+            **self.ventilation.attributes(),
+        }
 
 
 class RoomClimateNextVentilationWindowSensor(RoomClimateHouseBaseSensor):
@@ -155,6 +163,21 @@ class RoomClimateScoreSensor(RoomClimateBaseSensor):
     _attr_has_entity_name = True
     _attr_name = "Score"
     _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _unrecorded_attributes = frozenset(
+        {
+            "description",
+            "recommendation",
+            "dehumidify_advice",
+            "cooling_advice",
+            "next_ventilation_window",
+            "close_window_reason",
+            "close_cover_reason",
+            "wind_effect",
+            "input_age_minutes",
+            "notification_flags",
+        }
+    )
     _attr_icon = "mdi:home-thermometer"
 
     def __init__(self, coordinator: RoomClimateCoordinator, entry: ConfigEntry, room_id: str) -> None:

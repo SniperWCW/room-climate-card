@@ -127,8 +127,11 @@ def _optional_entity_field(
     defaults: dict[str, Any],
     domain: str,
 ) -> tuple[vol.Marker, selector.EntitySelector]:
+    # Use suggested_value instead of default: with a default, clearing the field
+    # in the UI re-inserted the old entity, so optional entities could never be
+    # removed again.
     if defaults.get(key):
-        marker = vol.Optional(key, default=defaults[key])
+        marker = vol.Optional(key, description={"suggested_value": defaults[key]})
     else:
         marker = vol.Optional(key)
     return marker, selector.EntitySelector(selector.EntitySelectorConfig(domain=domain))
@@ -140,25 +143,38 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
     devices = dr.async_get(hass)
     entities = er.async_get(hass)
 
-    def is_entity_in_area(entity_id: str, area_id: str) -> bool:
+    # Build the entity -> area index once instead of resolving the registries
+    # for every area x field x entity combination.
+    entities_by_area: dict[str, list[str]] = {}
+    for entity_id in states:
         entity_entry = entities.async_get(entity_id)
-        device_entry = devices.async_get(entity_entry.device_id) if entity_entry and entity_entry.device_id else None
-        return bool(
-            (entity_entry and entity_entry.area_id == area_id)
-            or (device_entry and device_entry.area_id == area_id)
-        )
+        area_id = entity_entry.area_id if entity_entry else None
+        if not area_id and entity_entry and entity_entry.device_id:
+            device_entry = devices.async_get(entity_entry.device_id)
+            area_id = device_entry.area_id if device_entry else None
+        if area_id:
+            entities_by_area.setdefault(area_id, []).append(entity_id)
 
     def find_entity_for_area(area_id: str, patterns: tuple[str, ...], domains: tuple[str, ...] = ("sensor",)) -> str:
         return next(
             (
                 entity_id
-                for entity_id in states
+                for entity_id in entities_by_area.get(area_id, [])
                 if entity_id.split(".")[0] in domains
-                and is_entity_in_area(entity_id, area_id)
                 and all(pattern in _normalized_slug(entity_id) for pattern in patterns)
             ),
             "",
         )
+
+    def find_by_device_class(area_id: str, device_class: str, units: set[str]) -> str:
+        for entity_id in entities_by_area.get(area_id, []):
+            if not entity_id.startswith("sensor."):
+                continue
+            state = hass.states.get(entity_id)
+            attrs = state.attributes if state else {}
+            if attrs.get("device_class") == device_class and attrs.get("unit_of_measurement") in units:
+                return entity_id
+        return ""
 
     room_map: dict[str, dict[str, Any]] = {}
     ignore_parts = {
@@ -211,8 +227,18 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
     for area in areas.async_list_areas():
         room = ensure_room(area.name)
         room[CONF_ROOM_TYPE] = _guess_room_type(area.name)
-        room[CONF_TEMPERATURE] = room[CONF_TEMPERATURE] or find_entity_for_area(area.id, ("temperatur",)) or find_entity_for_area(area.id, ("temperature",))
-        room[CONF_HUMIDITY] = room[CONF_HUMIDITY] or find_entity_for_area(area.id, ("luftfeuchtigkeit",)) or find_entity_for_area(area.id, ("humidity",))
+        room[CONF_TEMPERATURE] = (
+            room[CONF_TEMPERATURE]
+            or find_by_device_class(area.id, "temperature", {"°C", "°F"})
+            or find_entity_for_area(area.id, ("temperatur",))
+            or find_entity_for_area(area.id, ("temperature",))
+        )
+        room[CONF_HUMIDITY] = (
+            room[CONF_HUMIDITY]
+            or find_by_device_class(area.id, "humidity", {"%"})
+            or find_entity_for_area(area.id, ("luftfeuchtigkeit",))
+            or find_entity_for_area(area.id, ("humidity",))
+        )
         room[CONF_INSIDE_ABSOLUTE_HUMIDITY] = (
             room[CONF_INSIDE_ABSOLUTE_HUMIDITY]
             or find_entity_for_area(area.id, ("absolute_luftfeuchtigkeit",))
@@ -331,9 +357,24 @@ def _global_schema(hass, defaults: dict[str, Any] | None = None) -> vol.Schema:
     )
 
 
+ROOM_TYPE_LABELS = {
+    "default": "Standard",
+    "living": "Wohnzimmer",
+    "bedroom": "Schlafzimmer",
+    "child": "Kinderzimmer",
+    "bathroom": "Bad / WC",
+    "kitchen": "Küche",
+    "basement": "Keller",
+    "office": "Büro / Arbeitszimmer",
+}
+
+
 def _room_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     defaults = defaults or {}
-    room_type_options = [selector.SelectOptionDict(value=value, label=value) for value in ROOM_TYPE_OPTIONS]
+    room_type_options = [
+        selector.SelectOptionDict(value=value, label=ROOM_TYPE_LABELS.get(value, value))
+        for value in ROOM_TYPE_OPTIONS
+    ]
     orientation_options = [
         selector.SelectOptionDict(value=value, label=value or "Keine Angabe") for value in WINDOW_ORIENTATION_OPTIONS
     ]
@@ -354,10 +395,10 @@ def _room_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             vol.Optional(CONF_WINDOW_ORIENTATION, default=defaults.get(CONF_WINDOW_ORIENTATION, "")): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=orientation_options, mode=selector.SelectSelectorMode.DROPDOWN)
             ),
-            vol.Required(CONF_TEMPERATURE, default=defaults.get(CONF_TEMPERATURE, "")): selector.EntitySelector(
+            vol.Required(CONF_TEMPERATURE, description={"suggested_value": defaults.get(CONF_TEMPERATURE) or None}): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
-            vol.Required(CONF_HUMIDITY, default=defaults.get(CONF_HUMIDITY, "")): selector.EntitySelector(
+            vol.Required(CONF_HUMIDITY, description={"suggested_value": defaults.get(CONF_HUMIDITY) or None}): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             inside_abs_field[0]: inside_abs_field[1],
@@ -453,11 +494,6 @@ class RoomClimateOptionsFlow(config_entries.OptionsFlow):
             )
         return self.async_show_form(step_id="global", data_schema=_global_schema(self.hass, self.config))
 
-    async def async_step_add_room(self, user_input: dict[str, Any] | None = None):
-        if _available_detected_rooms(self.hass, self.rooms):
-            return await self.async_step_import_detected_rooms(user_input)
-        return await self.async_step_add_room_manual(user_input)
-
     async def async_step_add_room_manual(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
             room_id = slugify(user_input[CONF_ROOM_NAME])
@@ -472,7 +508,9 @@ class RoomClimateOptionsFlow(config_entries.OptionsFlow):
             rooms.append(room)
             return self._store({CONF_ROOMS: rooms})
         defaults = _next_detected_room_defaults(self.hass, self.rooms)
-        return self.async_show_form(step_id="add_room", data_schema=_room_schema(defaults))
+        # step_id must match this method: with "add_room" the submitted form was
+        # routed to the import step and the manually entered room was dropped.
+        return self.async_show_form(step_id="add_room_manual", data_schema=_room_schema(defaults))
 
     async def async_step_import_detected_rooms(self, user_input: dict[str, Any] | None = None):
         detected_rooms = _available_detected_rooms(self.hass, self.rooms)
