@@ -59,6 +59,13 @@ OPEN_COOLING_DELTA_RELAX = 0.5
 # Rooms start to need cooling this many degrees above the profile's comfort
 # maximum. This replaces the former fixed 27 °C room / 24 °C house thresholds.
 COOLING_START_OFFSET = 2.0
+# Never below this inside temperature: profiles such as kitchen or bedroom have
+# a low comfort maximum (20 °C), which made normal heated rooms (22 °C) ask for
+# cooling ventilation.
+MIN_COOLING_START = 24.0
+# Below this outside temperature it is heating season: cooling a room by
+# ventilating only wastes heating energy, so no cooling advice is given.
+MIN_OUTSIDE_TEMP_FOR_COOLING = 12.0
 
 
 def slugify(value: str) -> str:
@@ -105,7 +112,7 @@ def get_cooling_start(room_type: str, profile: dict[str, float]) -> float | None
     """
     if room_type == "basement":
         return None
-    return profile["temp_max"] + COOLING_START_OFFSET
+    return max(profile["temp_max"] + COOLING_START_OFFSET, MIN_COOLING_START)
 
 
 def get_dry_threshold(profile: dict[str, float]) -> float:
@@ -577,10 +584,12 @@ def evaluate_room(
         cooling_start - OPEN_TEMPERATURE_RELAX if cooling_start is not None and window_open else cooling_start
     )
     room_warm = cooling_start is not None and inside_temp is not None and inside_temp >= cooling_start
+    heating_season = outside_temp is not None and outside_temp < MIN_OUTSIDE_TEMP_FOR_COOLING
     can_cool = bool(
         effective_cooling_start is not None
         and inside_temp is not None
         and cooling_delta is not None
+        and not heating_season
         and inside_temp >= effective_cooling_start
         and cooling_delta >= required_cooling_delta
     )
@@ -669,6 +678,12 @@ def evaluate_room(
         elif not room_warm:
             cooling_text = "Raum ist nicht zu warm. Abkühlung ist nicht nötig."
             cooling_level = "neutral"
+        elif heating_season:
+            cooling_text = (
+                f"Fenster geschlossen halten. Bei {outside_temp:.0f} °C außen würde Lüften zum Kühlen "
+                "nur Heizenergie verschwenden – besser die Heizung reduzieren."
+            )
+            cooling_level = "neutral"
         elif not can_cool:
             sun_text = (
                 " Zusätzlicher Sonneneintrag spricht aktuell ebenfalls gegen Lüften."
@@ -692,7 +707,7 @@ def evaluate_room(
 
     # The next cooling window is only relevant for rooms that are too warm.
     next_window = None
-    if has_window and room_warm and inputs_available and cooling_level not in {"cooling", "open"}:
+    if has_window and room_warm and inputs_available and not heating_season and cooling_level not in {"cooling", "open"}:
         if cooling_window["time_text"]:
             next_window = (
                 f"Nächstes Lüftungsfenster: frühestens ab {cooling_window['time_text']} Uhr, wenn die Außentemperatur unter "
