@@ -5,6 +5,10 @@
     "@SniperWCW"
   ],
   "config_flow": true,
+  "dependencies": [
+    "frontend",
+    "http"
+  ],
   "documentation": "https://github.com/SniperWCW/room-climate-card",
   "integration_type": "service",
   "iot_class": "calculated",
