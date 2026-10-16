@@ -149,18 +149,39 @@ class RoomClimateCard extends HTMLElement {
   }
 
   getManagedRoomName(entityId, stateObj) {
-    const friendlyName = String(stateObj?.attributes?.friendly_name || "").trim();
+    const attrs = stateObj?.attributes || {};
+    if (attrs.room_name) return String(attrs.room_name);
+    const friendlyName = String(attrs.friendly_name || "").trim();
     if (friendlyName) {
-      return friendlyName.replace(/\s+score$/i, "").trim();
+      return friendlyName.replace(/^room climate\s+/i, "").replace(/\s+score$/i, "").trim();
     }
 
     const objectId = entityId.split(".")[1] || "";
     return objectId
+      .replace(/^room_climate_/i, "")
       .replace(/_score$/i, "")
       .split("_")
       .filter(Boolean)
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join(" ");
+  }
+
+  get locale() {
+    return this._hass?.locale?.language || this._hass?.language || "de";
+  }
+
+  fmt(value, digits = 1) {
+    if (value === null || value === undefined || !Number.isFinite(Number(value))) return "–";
+    return new Intl.NumberFormat(this.locale, {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    }).format(Number(value));
+  }
+
+  num(value) {
+    if (value === null || value === undefined || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
   }
 
   getManagedRooms() {
@@ -169,49 +190,59 @@ class RoomClimateCard extends HTMLElement {
       const rawScore = stateObj?.state;
       const score = rawScore === null || rawScore === undefined || rawScore === "" ? NaN : Number(rawScore);
       const esc = (value) => this.escapeHtml(value);
-      const roomType = attrs.room_type || "default";
-      const temperature = Number(attrs.temperature);
-      const humidity = Number(attrs.humidity);
-      const humidexValue = Number(attrs.humidex);
-      const profile = this.getRoomProfile({ room_type: roomType });
-      const windowKnown = typeof attrs.window_open === "boolean";
-      const windowText = windowKnown ? (attrs.window_open ? "offen" : "geschlossen") : "kein Sensor";
-      const level = {
-        label: esc(attrs.level || "Unbekannt"),
-        icon: esc(attrs.level_icon || "ℹ️"),
-        cls: attrs.level_class ? `rc-${esc(attrs.level_class)}` : "rc-medium",
-        rank: attrs.level_class || "unknown",
-      };
       const hasScore = Number.isFinite(score);
+      const levelClass = attrs.level_class || "unknown";
+      const roomName = this.getManagedRoomName(entityId, stateObj);
+      // The integration starts descriptions with "<Raum>: "; the tile shows the name already.
+      let description = String(attrs.description || "");
+      if (description.startsWith(`${roomName}: `)) {
+        description = description.slice(roomName.length + 2);
+        description = description.charAt(0).toUpperCase() + description.slice(1);
+      }
 
       return {
         entityId,
-        name: esc(this.getManagedRoomName(entityId, stateObj)),
-        score: hasScore ? score : 0,
-        scoreText: hasScore ? String(score) : "–",
-        hasScore,
-        level,
-        description: esc(attrs.description || "Keine Beschreibung verfügbar"),
+        name: esc(roomName),
+        score: hasScore ? score : null,
+        scoreText: hasScore ? String(Math.round(score)) : "–",
+        level: {
+          label: esc(attrs.level || "Unbekannt"),
+          cls: `rc-level-${esc(levelClass)}`,
+          rank: levelClass,
+        },
+        description: esc(description),
+        temperature: this.num(attrs.temperature),
+        humidity: this.num(attrs.humidity),
+        absoluteHumidity: this.num(attrs.inside_absolute_humidity),
         dehumidifyAdvice: esc(attrs.dehumidify_advice || ""),
-        coolingAdvice: esc(attrs.cooling_advice || ""),
         dehumidifyLevel: attrs.dehumidify_level || null,
+        coolingAdvice: esc(attrs.cooling_advice || ""),
         coolingLevel: attrs.cooling_level || null,
-        recommendation: esc(attrs.recommendation || ""),
         nextWindow: esc(attrs.next_ventilation_window || ""),
-        temperature: Number.isFinite(temperature) ? temperature : null,
-        humidity: Number.isFinite(humidity) ? humidity : null,
-        humidexValue: Number.isFinite(humidexValue) ? humidexValue : null,
-        simmerText: this.getSimmerText(attrs.simmer_felt ?? null),
+        windowKnown: typeof attrs.window_open === "boolean",
+        windowOpen: attrs.window_open === true,
         orientationLabel: attrs.window_orientation ? esc(attrs.window_orientation) : null,
-        solarExposure: esc(attrs.solar_exposure || "kein relevanter Sonneneintrag"),
+        solarExposure: esc(attrs.solar_exposure || ""),
         windEffect: esc(attrs.wind_effect || ""),
-        windowText,
         closeWindow: attrs.close_window === true,
         closeWindowReason: esc(attrs.close_window_reason || ""),
         closeCover: attrs.close_cover === true,
         closeCoverReason: esc(attrs.close_cover_reason || ""),
-        roomType,
-        profile,
+        moldRisk: attrs.mold_risk || null,
+        moldActive: attrs.mold_risk_active ?? attrs.mold_risk === "high",
+        moldReason: esc(attrs.mold_risk_reason || ""),
+        wallHumidity: this.num(attrs.wall_surface_humidity),
+        heatingActive: attrs.heating_active === true,
+        heatingTarget: this.num(attrs.heating_target_temperature),
+        reduceHeating: attrs.reduce_heating === true,
+        reduceHeatingReason: esc(attrs.reduce_heating_reason || ""),
+        dataQuality: attrs.data_quality || "good",
+        comfort: {
+          tempMin: this.num(attrs.comfort_temperature_min),
+          tempMax: this.num(attrs.comfort_temperature_max),
+          humidityMin: this.num(attrs.comfort_humidity_min),
+          humidityMax: this.num(attrs.comfort_humidity_max),
+        },
       };
     });
   }
@@ -223,34 +254,19 @@ class RoomClimateCard extends HTMLElement {
     if (!overview) return null;
 
     const attrs = overview.attributes || {};
+    const actions = Array.isArray(attrs.actions) ? attrs.actions : [];
     return {
       dayType: this.escapeHtml(attrs.day_type || overview.state),
-      summary: this.escapeHtml(attrs.summary || ""),
-      high: Number.isFinite(Number(attrs.forecast_high)) ? Number(attrs.forecast_high) : null,
-      low: Number.isFinite(Number(attrs.forecast_low)) ? Number(attrs.forecast_low) : null,
-      averageScore: Number.isFinite(Number(attrs.average_score)) ? Number(attrs.average_score) : null,
-      worstRoom: this.escapeHtml(attrs.worst_room || ""),
-      worstRoomScore: Number.isFinite(Number(attrs.worst_room_score)) ? Number(attrs.worst_room_score) : null,
+      icon: this.escapeHtml(attrs.icon || "mdi:weather-partly-cloudy"),
+      high: this.num(attrs.forecast_high),
+      low: this.num(attrs.forecast_low),
+      // Older versions do not expose has_actions; fall back to the counters.
+      hasActions:
+        attrs.has_actions === true ||
+        (attrs.has_actions === undefined &&
+          Boolean(attrs.ventilate_count || attrs.close_window_count || attrs.close_cover_count)),
+      actions: actions.map((action) => this.escapeHtml(action)),
     };
-  }
-
-  managedOverviewHtml() {
-    const overview = this.getManagedOverview();
-    if (!overview) return "";
-
-    const forecast = overview.high !== null
-      ? `Heute ${overview.low?.toFixed(0) ?? "-"} bis ${overview.high.toFixed(0)} °C`
-      : "Wetterprognose nicht verfügbar";
-    const roomStatus = overview.averageScore !== null
-      ? `Durchschnitt ${overview.averageScore}/100${overview.worstRoom ? ` · Niedrigster Wert: ${overview.worstRoom} (${overview.worstRoomScore}/100)` : ""}`
-      : "";
-    return `
-      <div class="overview">
-        <div class="overview-title">${overview.dayType}</div>
-        <div class="overview-summary">${overview.summary}</div>
-        <div class="overview-meta">${forecast}${roomStatus ? ` · ${roomStatus}` : ""}</div>
-      </div>
-    `;
   }
 
   getManagedHouseVentilation() {
@@ -265,64 +281,92 @@ class RoomClimateCard extends HTMLElement {
 
     const currentAttrs = current?.attributes || {};
     const windowAttrs = nextWindow?.attributes || {};
-    const numericAttribute = (value) => {
-      if (value === null || value === undefined || value === "") return null;
-      const number = Number(value);
-      return Number.isFinite(number) ? number : null;
-    };
     const esc = (value) => this.escapeHtml(value);
+    const toneByColor = { green: "ok", amber: "warn", orange: "warn", blue: "info", grey: "muted" };
     return {
-      title: esc(current?.state || "Lüftung wird bewertet"),
-      icon: esc(currentAttrs.icon || currentAttrs.entity_picture || "mdi:air-filter"),
-      color: esc(currentAttrs.color || "blue"),
+      // Since 0.4 the state is a stable key; the display text is in "title".
+      title: esc(currentAttrs.title || current?.state || "Lüftung wird bewertet"),
+      icon: esc(currentAttrs.icon || "mdi:air-filter"),
+      tone: toneByColor[currentAttrs.color] || "info",
       reason: esc(currentAttrs.reason || ""),
-      insideHumidity: numericAttribute(currentAttrs.inside_absolute_humidity),
-      outsideHumidity: numericAttribute(currentAttrs.outside_absolute_humidity),
-      humidityDelta: numericAttribute(currentAttrs.humidity_delta),
-      duration: numericAttribute(currentAttrs.duration_minutes),
+      insideHumidity: this.num(currentAttrs.inside_absolute_humidity),
+      outsideHumidity: this.num(currentAttrs.outside_absolute_humidity),
+      duration: this.num(currentAttrs.duration_minutes),
       sessionDetail: esc(currentAttrs.session_detail || ""),
+      recommendedRooms: (currentAttrs.recommended_rooms || []).map(esc),
+      windowAvailable: windowAttrs.available === true,
       windowTitle: esc(nextWindow?.state || "Kein Lüftungsfenster"),
       windowReason: esc(windowAttrs.reason || "Wetterdaten werden aktualisiert."),
-      windowAvailable: windowAttrs.available === true,
-      expectedHumidity: numericAttribute(windowAttrs.expected_absolute_humidity),
-      expectedTemperature: numericAttribute(windowAttrs.expected_temperature),
+      expectedHumidity: this.num(windowAttrs.expected_absolute_humidity),
+      expectedTemperature: this.num(windowAttrs.expected_temperature),
     };
   }
 
-  managedHouseVentilationHtml() {
-    const ventilation = this.getManagedHouseVentilation();
-    if (!ventilation) return "";
-
-    const currentMetrics = [
-      ventilation.insideHumidity !== null ? `Innen ${ventilation.insideHumidity.toFixed(1)} g/m³` : "",
-      ventilation.outsideHumidity !== null ? `Außen ${ventilation.outsideHumidity.toFixed(1)} g/m³` : "",
-      ventilation.humidityDelta !== null ? `Differenz ${ventilation.humidityDelta.toFixed(1)} g/m³` : "",
-      ventilation.duration !== null ? `ca. ${ventilation.duration} Minuten` : "",
-    ].filter(Boolean).join(" · ");
-    const windowMetrics = [
-      ventilation.expectedHumidity !== null ? `${ventilation.expectedHumidity.toFixed(1)} g/m³` : "",
-      ventilation.expectedTemperature !== null ? `${ventilation.expectedTemperature.toFixed(1)} °C` : "",
-    ].filter(Boolean).join(" · ");
-
+  managedHeaderHtml() {
+    const overview = this.getManagedOverview();
+    const title = this.escapeHtml(this.config.title || "Raumklima");
+    const range = overview && overview.high !== null
+      ? `${this.fmt(overview.low, 0)}–${this.fmt(overview.high, 0)} °C`
+      : "";
     return `
-      <div class="house-ventilation">
-        <div class="house-advice house-advice--${ventilation.color}">
-          <ha-icon icon="${ventilation.icon}"></ha-icon>
-          <div>
-            <div class="house-advice-title">${ventilation.title}</div>
-            <div class="house-advice-detail">${currentMetrics || ventilation.reason}</div>
-            ${ventilation.sessionDetail ? `<div class="house-advice-session">${ventilation.sessionDetail}</div>` : ""}
-          </div>
-        </div>
-        <div class="house-advice house-advice--window ${ventilation.windowAvailable ? "house-advice--available" : ""}">
-          <ha-icon icon="mdi:clock-check-outline"></ha-icon>
-          <div>
-            <div class="house-advice-title">${ventilation.windowTitle}</div>
-            <div class="house-advice-detail">${windowMetrics || ventilation.windowReason}</div>
-          </div>
-        </div>
+      <div class="rc-header">
+        <div class="rc-title">${title}</div>
+        ${overview ? `
+          <div class="rc-day" title="Tageslage für die nächsten 24 Stunden">
+            <ha-icon icon="${overview.icon}"></ha-icon>
+            <span>${overview.dayType}${range ? ` · ${range}` : ""}</span>
+          </div>` : ""}
       </div>
     `;
+  }
+
+  managedStatusHtml() {
+    const ventilation = this.getManagedHouseVentilation();
+    const overview = this.getManagedOverview();
+    if (!ventilation && !overview) return "";
+
+    let houseHtml = "";
+    if (ventilation) {
+      const meta = [
+        ventilation.insideHumidity !== null && ventilation.outsideHumidity !== null
+          ? `Feuchte innen ${this.fmt(ventilation.insideHumidity)} · außen ${this.fmt(ventilation.outsideHumidity)} g/m³`
+          : "",
+        ventilation.duration !== null ? `ca. ${this.fmt(ventilation.duration, 0)} Min.` : "",
+        ventilation.recommendedRooms.length ? `Räume: ${ventilation.recommendedRooms.join(", ")}` : "",
+      ].filter(Boolean).join(" · ");
+      const windowMeta = [
+        ventilation.expectedTemperature !== null ? `außen ca. ${this.fmt(ventilation.expectedTemperature)} °C` : "",
+        ventilation.expectedHumidity !== null ? `${this.fmt(ventilation.expectedHumidity)} g/m³` : "",
+      ].filter(Boolean).join(" · ");
+      houseHtml = `
+        <div class="rc-status rc-tone-${ventilation.tone}">
+          <ha-icon icon="${ventilation.icon}"></ha-icon>
+          <div class="rc-status-body">
+            <div class="rc-status-title">${ventilation.title}</div>
+            ${ventilation.reason ? `<div class="rc-status-text">${ventilation.reason}</div>` : ""}
+            ${ventilation.sessionDetail ? `<div class="rc-status-text">${ventilation.sessionDetail}</div>` : ""}
+            ${meta ? `<div class="rc-status-meta">${meta}</div>` : ""}
+          </div>
+        </div>
+        <div class="rc-window ${ventilation.windowAvailable ? "rc-window--available" : ""}">
+          <ha-icon icon="mdi:clock-check-outline"></ha-icon>
+          <div class="rc-status-body">
+            <div class="rc-window-label">Nächstes Lüftungsfenster</div>
+            <div class="rc-window-value">${ventilation.windowTitle}</div>
+            <div class="rc-status-meta">${ventilation.windowAvailable ? windowMeta : ventilation.windowReason}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    const actionsHtml = overview && overview.hasActions && overview.actions.length
+      ? `
+        <div class="rc-todo">
+          <div class="rc-todo-title">Heute zu tun</div>
+          <ul>${overview.actions.map((action) => `<li>${action}</li>`).join("")}</ul>
+        </div>`
+      : "";
+    return `<div class="rc-status-grid">${houseHtml}</div>${actionsHtml}`;
   }
 
   getState(entity) {
@@ -1421,6 +1465,7 @@ class RoomClimateCard extends HTMLElement {
       <ha-card>
         <div class="content">
           <div class="title">Raumklima Übersicht</div>
+          ${this.legacyNoticeHtml()}
           ${Object.entries(groups)
             .map(
               ([label, rooms]) => `
@@ -1454,123 +1499,253 @@ class RoomClimateCard extends HTMLElement {
     `;
   }
 
-  managedRoomHtml(room) {
-    const actionHints = [
-      room.closeWindow && room.closeWindowReason ? `<div><b>Fenster schließen:</b> ${room.closeWindowReason}</div>` : "",
-      room.closeCover && room.closeCoverReason ? `<div><b>Rollladen schließen:</b> ${room.closeCoverReason}</div>` : "",
-    ].filter(Boolean);
-    // Use the advice levels from the integration instead of matching words in
-    // the text ("nicht sinnvoll" previously matched "sinnvoll").
-    const levels = [room.dehumidifyLevel, room.coolingLevel];
-    const legacyText = `${room.dehumidifyAdvice} ${room.coolingAdvice}`;
-    const ventilationClass = levels.some(Boolean)
-      ? levels.includes("open")
-        ? "vent-open"
-        : levels.some((level) => ["recommended", "short", "cooling"].includes(level))
-          ? "vent-recommended"
-          : "vent-none"
-      : legacyText.includes("offen")
-        ? "vent-open"
-        : "vent-none";
-
-    if (this.config.mode === "compact") {
-      return `
-        <div class="room ${room.level.cls} ${ventilationClass}">
-          <div class="top">
-            <div>
-              <div class="name">${room.level.icon} ${room.name}</div>
-              <div class="sub">${room.level.label}</div>
-            </div>
-            <div class="score">${room.scoreText ?? room.score}</div>
-          </div>
-          <div class="metrics">
-            <span>Temperatur ${room.temperature?.toFixed(1) ?? "-"} °C</span>
-            <span>Luftfeuchtigkeit ${room.humidity?.toFixed(0) ?? "-"} %</span>
-            ${room.dehumidifyAdvice ? `<span>Entfeuchtung ${room.dehumidifyAdvice}</span>` : ""}
-            ${room.coolingAdvice ? `<span>Abkühlung ${room.coolingAdvice}</span>` : ""}
-            ${room.closeWindow && room.closeWindowReason ? `<span>Fenster schließen ${room.closeWindowReason}</span>` : ""}
-            ${room.closeCover && room.closeCoverReason ? `<span>Rollladen schließen ${room.closeCoverReason}</span>` : ""}
-          </div>
-        </div>
-      `;
+  roomActions(room) {
+    // Only actionable advice is listed; neutral texts ("nicht nötig") are hidden.
+    const actions = [];
+    const add = (tone, icon, text) => text && actions.push({ tone, icon, text });
+    if (room.dataQuality !== "good") {
+      add("muted", "mdi:alert-circle-outline", "Aktuelle Raumwerte fehlen oder sind veraltet.");
+      return actions;
     }
+    if (room.closeWindow) add("warn", "mdi:window-closed-variant", room.closeWindowReason || "Fenster schließen.");
+    if (room.reduceHeating) add("warn", "mdi:radiator-off", room.reduceHeatingReason);
+    if (room.moldActive) add("error", "mdi:water-alert", room.moldReason);
+    if (room.closeCover) add("info", "mdi:roller-shade-closed", room.closeCoverReason);
+    if (["recommended", "short"].includes(room.dehumidifyLevel)) add("info", "mdi:water-minus", room.dehumidifyAdvice);
+    if (room.coolingLevel === "cooling") add("info", "mdi:snowflake-thermometer", room.coolingAdvice);
+    if (room.dehumidifyLevel === "open" && room.windowOpen && !room.closeWindow) {
+      add("ok", "mdi:window-open-variant", room.dehumidifyAdvice);
+    }
+    if (["observe", "avoid", "dry"].includes(room.dehumidifyLevel)) add("muted", "mdi:information-outline", room.dehumidifyAdvice);
+    if (room.coolingLevel === "avoid") add("muted", "mdi:information-outline", room.coolingAdvice);
+    return actions;
+  }
+
+  roomChips(room) {
+    const chips = [
+      `<span class="rc-chip"><ha-icon icon="mdi:thermometer"></ha-icon>${this.fmt(room.temperature)} °C</span>`,
+      `<span class="rc-chip"><ha-icon icon="mdi:water-percent"></ha-icon>${this.fmt(room.humidity, 0)} %</span>`,
+    ];
+    if (room.windowOpen) chips.push(`<span class="rc-chip rc-chip--info"><ha-icon icon="mdi:window-open-variant"></ha-icon>Fenster offen</span>`);
+    if (room.heatingActive) {
+      chips.push(
+        `<span class="rc-chip rc-chip--warm"><ha-icon icon="mdi:radiator"></ha-icon>Heizt${room.heatingTarget !== null ? ` auf ${this.fmt(room.heatingTarget)} °C` : ""}</span>`
+      );
+    }
+    if (room.moldRisk === "high" || room.moldRisk === "elevated") {
+      chips.push(
+        `<span class="rc-chip rc-chip--${room.moldRisk === "high" ? "error" : "warn"}" title="Geschätzte Luftfeuchte an der kältesten Außenwand">
+          <ha-icon icon="mdi:wall"></ha-icon>Wandfeuchte ${this.fmt(room.wallHumidity, 0)} %</span>`
+      );
+    }
+    return chips.join("");
+  }
+
+  managedRoomHtml(room) {
+    const compact = this.config.mode === "compact";
+    const actions = this.roomActions(room);
+    const actionsHtml = actions.length
+      ? `<ul class="rc-actions">${actions
+          .map((action) => `<li class="rc-action rc-tone-${action.tone}"><ha-icon icon="${action.icon}"></ha-icon><span>${action.text}</span></li>`)
+          .join("")}</ul>`
+      : `<div class="rc-ok"><ha-icon icon="mdi:check-circle-outline"></ha-icon>Kein Handlungsbedarf</div>`;
+
+    const comfort = room.comfort;
+    const details = compact
+      ? ""
+      : [
+          comfort.tempMin !== null
+            ? `Zielbereich ${this.fmt(comfort.tempMin, 0)}–${this.fmt(comfort.tempMax, 0)} °C · ${this.fmt(comfort.humidityMin, 0)}–${this.fmt(comfort.humidityMax, 0)} %`
+            : "",
+          room.absoluteHumidity !== null ? `Absolute Feuchte ${this.fmt(room.absoluteHumidity)} g/m³` : "",
+          room.orientationLabel ? `Fenster ${room.orientationLabel}${room.solarExposure ? ` · ${room.solarExposure}` : ""}` : "",
+          room.windEffect ? `Wind ${room.windEffect}` : "",
+          room.nextWindow,
+        ].filter(Boolean);
 
     return `
-      <div class="room ${room.level.cls} ${ventilationClass}">
-        <div class="top">
-          <div>
-            <div class="name">${room.level.icon} ${room.name}</div>
-            <div class="sub">Raumklima: ${room.scoreText ?? room.score}/100 · ${room.level.label}</div>
+      <div class="rc-room ${room.level.cls}">
+        <div class="rc-room-head">
+          <div class="rc-room-name">${room.name}</div>
+          <div class="rc-score" title="Raumklima-Score">
+            <span class="rc-score-value">${room.scoreText}</span>
+            <span class="rc-score-label">${room.level.label}</span>
           </div>
-          <div class="score">${room.scoreText ?? room.score}</div>
         </div>
-
-        <div class="text">${room.description}</div>
-
-        ${(room.dehumidifyAdvice || room.coolingAdvice || actionHints.length) ? `
-          <div class="ventilation-box">
-            ${room.dehumidifyAdvice ? `<div><b>Entfeuchtung:</b> ${room.dehumidifyAdvice}</div>` : ""}
-            ${room.coolingAdvice ? `<div><b>Abkühlung:</b> ${room.coolingAdvice}</div>` : ""}
-            ${actionHints.join("")}
-            ${room.nextWindow ? `<div class="next-window"><b>${room.nextWindow}</b></div>` : ""}
-          </div>
-        ` : ""}
-
-        <div class="details">
-          <div><b>Temperatur:</b> ${room.temperature?.toFixed(1) ?? "-"} C</div>
-          <div><b>Luftfeuchtigkeit:</b> ${room.humidity?.toFixed(0) ?? "-"} %</div>
-          <div><b>Zielbereich:</b> ${room.profile.humidityMin}–${room.profile.humidityMax} % · ${room.profile.tempMin}–${room.profile.tempMax} C</div>
-          <div><b>Humidex:</b> ${room.humidexValue?.toFixed(1) ?? "-"}</div>
-          <div><b>Sommer Simmer:</b> ${room.simmerText}</div>
-          ${room.orientationLabel ? `<div><b>Fensterlage:</b> ${room.orientationLabel} · ${room.solarExposure}</div>` : ""}
-          ${room.windEffect ? `<div><b>Wind:</b> ${room.windEffect}</div>` : ""}
-        </div>
+        <div class="rc-chips">${this.roomChips(room)}</div>
+        ${!compact && room.description && room.score !== null && room.score < 90 ? `<div class="rc-room-text">${room.description}</div>` : ""}
+        ${actionsHtml}
+        ${details.length ? `<div class="rc-details">${details.map((line) => `<div>${line}</div>`).join("")}</div>` : ""}
       </div>
     `;
   }
 
-  managedGroupedHtml() {
-    const groups = {};
-
+  sortedManagedRooms() {
     const severity = ["critical", "bad", "warning", "unknown", "medium", "good", "excellent"];
-    const rooms = this.getManagedRooms().sort(
-      (a, b) => severity.indexOf(a.level.rank) - severity.indexOf(b.level.rank)
-    );
-    rooms.forEach((room) => {
-      const key = `${room.level.icon} ${room.level.label}`;
-      groups[key] ??= [];
-      groups[key].push(room);
+    const rooms = this.getManagedRooms();
+    if (this.config.sort === "name") return rooms;
+    // Rooms that need attention first, then by score.
+    return rooms.sort((a, b) => {
+      const actionsA = this.roomActions(a).some((action) => action.tone !== "muted") ? 0 : 1;
+      const actionsB = this.roomActions(b).some((action) => action.tone !== "muted") ? 0 : 1;
+      return (
+        actionsA - actionsB ||
+        severity.indexOf(a.level.rank) - severity.indexOf(b.level.rank) ||
+        (a.score ?? 0) - (b.score ?? 0)
+      );
     });
+  }
 
+  managedGroupedHtml() {
+    const rows = this.sortedManagedRooms().map((room) => {
+      const action = this.roomActions(room).find((item) => item.tone !== "muted");
+      return `
+        <div class="rc-row ${room.level.cls}">
+          <div class="rc-row-name">${room.name}</div>
+          <div class="rc-row-text">${action
+            ? `<ha-icon class="rc-tone-${action.tone}" icon="${action.icon}"></ha-icon>${action.text}`
+            : `<span class="rc-muted">Kein Handlungsbedarf</span>`}</div>
+          <div class="rc-row-score">${room.scoreText}<span>${room.level.label}</span></div>
+        </div>
+      `;
+    });
+    return `<div class="rc-rows">${rows.join("")}</div>`;
+  }
+
+  legacyNoticeHtml() {
+    return `
+      <div style="margin:0 0 12px;padding:10px 12px;border-radius:12px;background:color-mix(in srgb, var(--warning-color, #ffa600) 14%, transparent);line-height:1.4;font-size:13px;">
+        <b>Veralteter Kartenmodus.</b> Diese Konfiguration mit eigener Raumliste wird in einer kommenden Version entfernt.
+        Richte stattdessen die Integration „Room Climate“ ein – die Karte zeigt die Räume dann automatisch und mit allen neuen Funktionen.
+      </div>
+    `;
+  }
+
+  managedHtml() {
+    const rooms = this.sortedManagedRooms();
+    const columns = Math.max(1, Math.min(4, Number(this.config.columns) || 2));
+    const body = this.config.mode === "grouped"
+      ? this.managedGroupedHtml()
+      : rooms.length
+        ? `<div class="rc-grid" style="--rc-columns:${columns}">${rooms.map((room) => this.managedRoomHtml(room)).join("")}</div>`
+        : `<div class="rc-empty">Noch keine Räume eingerichtet. Räume werden in der Integration „Room Climate“ unter Einstellungen → Geräte & Dienste hinzugefügt.</div>`;
     return `
       <ha-card>
-          <div class="content">
-            <div class="title">Raumklima</div>
-            ${this.managedHouseVentilationHtml()}
-            ${this.managedOverviewHtml()}
-            ${Object.entries(groups)
-            .map(
-              ([label, rooms]) => `
-                <div class="group">
-                  <div class="group-title">${label}</div>
-                  ${rooms
-                    .map(
-                      (room) => `
-                        <div class="group-row">
-                          <span>${room.name}</span>
-                          <span>${[room.recommendation || "Keine Empfehlung", room.closeWindowReason, room.closeCoverReason].filter(Boolean).join(" · ")}</span>
-                          <b>${room.scoreText ?? room.score}/100</b>
-                        </div>
-                      `
-                    )
-                    .join("")}
-                </div>
-              `
-            )
-            .join("")}
+        <div class="rc">
+          ${this.managedHeaderHtml()}
+          ${this.managedStatusHtml()}
+          ${body}
         </div>
-        ${this.styles()}
+        ${this.managedStyles()}
       </ha-card>
+    `;
+  }
+
+  managedStyles() {
+    return `
+      <style>
+        .rc {
+          --rc-ok: var(--success-color, #43a047);
+          --rc-warn: var(--warning-color, #ffa600);
+          --rc-error: var(--error-color, #db4437);
+          --rc-info: var(--info-color, #039be5);
+          --rc-muted: var(--secondary-text-color);
+          --rc-surface: var(--secondary-background-color, rgba(127, 127, 127, 0.08));
+          --rc-level: var(--rc-muted);
+          padding: 16px;
+          display: grid;
+          gap: 12px;
+        }
+        .rc ha-icon { --mdc-icon-size: 18px; flex: none; }
+        .rc-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+        .rc-title { font-size: 20px; font-weight: 600; }
+        .rc-day {
+          display: inline-flex; align-items: center; gap: 6px;
+          padding: 4px 10px; border-radius: 999px;
+          background: var(--rc-surface); color: var(--secondary-text-color); font-size: 13px;
+        }
+        .rc-status-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+        .rc-status, .rc-window {
+          display: flex; gap: 12px; align-items: flex-start;
+          padding: 12px 14px; border-radius: 14px;
+          background: var(--rc-surface);
+        }
+        .rc-status { --rc-tone: var(--rc-info); background: color-mix(in srgb, var(--rc-tone) 12%, transparent); }
+        .rc-status > ha-icon, .rc-window > ha-icon { --mdc-icon-size: 26px; color: var(--rc-tone, var(--rc-muted)); margin-top: 1px; }
+        .rc-window--available { --rc-tone: var(--rc-ok); }
+        .rc-status-body { min-width: 0; display: grid; gap: 2px; }
+        .rc-status-title, .rc-window-value { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+        .rc-window-label { font-size: 12px; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.04em; }
+        .rc-status-text { line-height: 1.35; }
+        .rc-status-meta { font-size: 12px; color: var(--secondary-text-color); line-height: 1.35; }
+        .rc-todo { padding: 10px 14px; border-radius: 14px; border-left: 4px solid var(--rc-warn); background: color-mix(in srgb, var(--rc-warn) 10%, transparent); }
+        .rc-todo-title { font-weight: 600; margin-bottom: 4px; }
+        .rc-todo ul { margin: 0; padding-left: 18px; line-height: 1.45; }
+        .rc-grid { display: grid; gap: 12px; grid-template-columns: repeat(var(--rc-columns, 2), minmax(0, 1fr)); }
+        .rc-room {
+          display: grid; gap: 10px; align-content: start;
+          padding: 14px; border-radius: 16px;
+          border: 1px solid var(--divider-color);
+          border-left: 5px solid var(--rc-level);
+          background: var(--ha-card-background, var(--card-background-color));
+        }
+        .rc-level-excellent { --rc-level: var(--rc-ok); }
+        .rc-level-good { --rc-level: color-mix(in srgb, var(--rc-ok) 65%, var(--rc-warn)); }
+        .rc-level-medium { --rc-level: var(--rc-warn); }
+        .rc-level-warning { --rc-level: color-mix(in srgb, var(--rc-warn) 50%, var(--rc-error)); }
+        .rc-level-bad, .rc-level-critical { --rc-level: var(--rc-error); }
+        .rc-room-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+        .rc-room-name { font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
+        .rc-score { display: grid; justify-items: end; line-height: 1; }
+        .rc-score-value { font-size: 26px; font-weight: 700; color: var(--rc-level); }
+        .rc-score-label { font-size: 12px; color: var(--secondary-text-color); margin-top: 3px; }
+        .rc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+        .rc-chip {
+          display: inline-flex; align-items: center; gap: 4px;
+          padding: 3px 9px; border-radius: 999px; font-size: 13px;
+          background: var(--rc-surface);
+        }
+        .rc-chip ha-icon { --mdc-icon-size: 15px; color: var(--secondary-text-color); }
+        .rc-chip--info { background: color-mix(in srgb, var(--rc-info) 14%, transparent); }
+        .rc-chip--warm { background: color-mix(in srgb, var(--rc-warn) 16%, transparent); }
+        .rc-chip--warn { background: color-mix(in srgb, var(--rc-warn) 18%, transparent); }
+        .rc-chip--error { background: color-mix(in srgb, var(--rc-error) 16%, transparent); }
+        .rc-room-text { line-height: 1.4; color: var(--secondary-text-color); }
+        .rc-actions { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+        .rc-action {
+          display: flex; gap: 8px; align-items: flex-start;
+          padding: 8px 10px; border-radius: 10px; line-height: 1.35;
+          background: color-mix(in srgb, var(--rc-tone) 12%, transparent);
+        }
+        .rc-action ha-icon { color: var(--rc-tone); margin-top: 1px; }
+        .rc-tone-ok { --rc-tone: var(--rc-ok); }
+        .rc-tone-info { --rc-tone: var(--rc-info); }
+        .rc-tone-warn { --rc-tone: var(--rc-warn); }
+        .rc-tone-error { --rc-tone: var(--rc-error); }
+        .rc-tone-muted { --rc-tone: var(--rc-muted); }
+        .rc-action.rc-tone-muted { background: var(--rc-surface); color: var(--secondary-text-color); }
+        .rc-ok { display: flex; align-items: center; gap: 6px; color: var(--secondary-text-color); font-size: 14px; }
+        .rc-ok ha-icon { color: var(--rc-ok); }
+        .rc-details { display: grid; gap: 3px; font-size: 12px; color: var(--secondary-text-color); border-top: 1px solid var(--divider-color); padding-top: 8px; }
+        .rc-rows { display: grid; gap: 6px; }
+        .rc-row {
+          display: grid; grid-template-columns: minmax(90px, 1fr) 2fr auto; gap: 10px; align-items: center;
+          padding: 8px 12px; border-radius: 12px; background: var(--rc-surface);
+          border-left: 4px solid var(--rc-level);
+        }
+        .rc-row-name { font-weight: 600; }
+        .rc-row-text ha-icon { color: var(--rc-tone); margin-top: 1px; }
+        .rc-row-text { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; line-height: 1.35; }
+        .rc-row-score { font-weight: 700; color: var(--rc-level); text-align: right; display: grid; }
+        .rc-row-score span { font-size: 11px; font-weight: 400; color: var(--secondary-text-color); }
+        .rc-muted { color: var(--secondary-text-color); }
+        .rc-empty { color: var(--secondary-text-color); line-height: 1.4; }
+        @media (max-width: 600px) {
+          .rc-grid { grid-template-columns: 1fr; }
+          .rc-row { grid-template-columns: 1fr auto; }
+          .rc-row-text { grid-column: 1 / -1; grid-row: 2; }
+        }
+      </style>
     `;
   }
 
@@ -1578,27 +1753,16 @@ class RoomClimateCard extends HTMLElement {
     if (!this._hass || !this.config) return;
 
     if (!this.isLegacyConfig()) {
-      const rooms = this.getManagedRooms();
-
-      if (this.config.mode === "grouped") {
-        this.innerHTML = this.managedGroupedHtml();
-        return;
-      }
-
-      this.innerHTML = `
-        <ha-card>
-          <div class="content">
-            <div class="title">Raumklima</div>
-            ${this.managedHouseVentilationHtml()}
-            ${this.managedOverviewHtml()}
-            <div class="grid" style="grid-template-columns: repeat(${this.config.columns}, minmax(0, 1fr));">
-              ${rooms.map((room) => this.managedRoomHtml(room)).join("")}
-            </div>
-          </div>
-          ${this.styles()}
-        </ha-card>
-      `;
+      this.innerHTML = this.managedHtml();
       return;
+    }
+
+    if (!this._legacyWarned) {
+      this._legacyWarned = true;
+      console.warn(
+        "room-climate-card: the card-only configuration with a 'rooms' list is deprecated and will be removed. " +
+          "Set up the Room Climate integration instead; the card then shows its rooms automatically."
+      );
     }
 
     if (this.config.mode === "grouped") {
@@ -1612,6 +1776,7 @@ class RoomClimateCard extends HTMLElement {
       <ha-card>
         <div class="content">
           <div class="title">Raumklima</div>
+          ${this.legacyNoticeHtml()}
           <div class="grid" style="grid-template-columns: repeat(${this.config.columns}, minmax(0, 1fr));">
             ${rooms.map((room) => this.roomHtml(room)).join("")}
           </div>
@@ -2051,7 +2216,12 @@ class RoomClimateCardEditor extends HTMLElement {
       })
       .map(([entityId, stateObj]) => ({
         entityId,
-        label: String(stateObj?.attributes?.friendly_name || entityId).replace(/\s+score$/i, "").trim(),
+        label: String(
+          stateObj?.attributes?.room_name ||
+            String(stateObj?.attributes?.friendly_name || entityId)
+              .replace(/^room climate\s+/i, "")
+              .replace(/\s+score$/i, "")
+        ).trim(),
       }));
   }
 
@@ -2262,11 +2432,20 @@ class RoomClimateCardEditor extends HTMLElement {
 
       this.innerHTML = `
         <div class="editor">
+          <label>Titel</label>
+          <input type="text" id="title" value="${this.escapeHtml(this.config.title ?? "Raumklima")}">
+
           <label>Darstellung</label>
           <select id="mode">
             <option value="detailed" ${this.config.mode === "detailed" ? "selected" : ""}>Detailliert</option>
             <option value="compact" ${this.config.mode === "compact" ? "selected" : ""}>Kompakt</option>
-            <option value="grouped" ${this.config.mode === "grouped" ? "selected" : ""}>Gruppiert</option>
+            <option value="grouped" ${this.config.mode === "grouped" ? "selected" : ""}>Liste</option>
+          </select>
+
+          <label>Sortierung</label>
+          <select id="sort">
+            <option value="attention" ${this.config.sort !== "name" ? "selected" : ""}>Handlungsbedarf zuerst</option>
+            <option value="name" ${this.config.sort === "name" ? "selected" : ""}>Nach Name</option>
           </select>
 
           <label>Spalten</label>
@@ -2278,11 +2457,10 @@ class RoomClimateCardEditor extends HTMLElement {
 
           <div class="entity-help integration-help">
             <div><b>Integration-Modus</b></div>
-            <div>Die Karte verwendet automatisch die in der Room-Climate-Integration angelegten Raeume und Entitaeten.</div>
-            <div>Bestehende alte YAML-Karten mit manueller Sensor-Auswahl funktionieren weiterhin unveraendert.</div>
+            <div>Die Karte verwendet automatisch die in der Room-Climate-Integration angelegten Räume und Entitäten.</div>
           </div>
 
-          <h3>Raeume</h3>
+          <h3>Räume</h3>
           <label class="managed-room-option managed-room-option--master">
             <input type="checkbox" id="show-all-rooms" ${showAllRooms ? "checked" : ""}>
             <span>Alle konfigurierten Räume anzeigen</span>
@@ -2363,6 +2541,14 @@ class RoomClimateCardEditor extends HTMLElement {
 
       this.querySelector("#mode")?.addEventListener("change", (e) => {
         this.updateRoot("mode", e.target.value);
+      });
+
+      this.querySelector("#title")?.addEventListener("change", (e) => {
+        this.updateRoot("title", e.target.value);
+      });
+
+      this.querySelector("#sort")?.addEventListener("change", (e) => {
+        this.updateRoot("sort", e.target.value);
       });
 
       this.querySelector("#columns")?.addEventListener("change", (e) => {

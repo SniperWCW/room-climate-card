@@ -30,7 +30,13 @@ jobs:
         with:
           python-version: "3.14"
       - run: pip install -r requirements_test.txt
-      - run: python -m pytest -q tests
+      - name: Run unit and Home Assistant integration tests
+        run: |
+          set -o pipefail
+          python -m pytest -q -rfEs tests 2>&1 | tee pytest.log
+      - name: Report test summary
+        if: always()
+        run: echo "::notice title=pytest::$(tail -n 1 pytest.log)"
 
   hassfest:
     runs-on: ubuntu-latest

@@ -72,6 +72,11 @@ MIN_COOLING_START = 24.0
 MIN_OUTSIDE_TEMP_FOR_COOLING = 12.0
 
 
+def _de(value: float) -> str:
+    """Format a number with one decimal and a German decimal comma."""
+    return f"{value:.1f}".replace(".", ",")
+
+
 def slugify(value: str) -> str:
     cleaned = "".join(ch.lower() if ch.isalnum() else "_" for ch in (value or ""))
     while "__" in cleaned:
@@ -362,15 +367,15 @@ def get_climate_causes(
 
     if temp is not None:
         if temp >= 29:
-            causes.append(f"sehr warm ({temp:.1f} °C)")
+            causes.append(f"sehr warm ({_de(temp)} °C)")
         elif temp >= 26:
-            causes.append(f"warm ({temp:.1f} °C)")
+            causes.append(f"warm ({_de(temp)} °C)")
         elif temp > profile["temp_max"] + 1:
-            causes.append(f"etwas warm ({temp:.1f} °C)")
+            causes.append(f"etwas warm ({_de(temp)} °C)")
         elif temp < profile["temp_min"]:
-            causes.append(f"zu kühl ({temp:.1f} °C)")
+            causes.append(f"zu kühl ({_de(temp)} °C)")
         elif temp < profile["temp_min"] + 1:
-            causes.append(f"eher kühl ({temp:.1f} °C)")
+            causes.append(f"eher kühl ({_de(temp)} °C)")
 
     if rel_humidity is not None:
         if rel_humidity < get_dry_threshold(profile):
@@ -608,6 +613,12 @@ class RoomResult:
     reduce_heating: bool = False
     reduce_heating_reason: str | None = None
 
+    def set_mold_pending(self) -> None:
+        """Hold back a fresh mould risk (e.g. right after a shower)."""
+        self.mold_risk = False
+        self.attributes["mold_risk_active"] = False
+        self.attributes["notification_flags"][NOTIFICATION_MOLD_RISK] = False
+
     def apply_session_finish(self, reason: str) -> None:
         """Force a close-window advice, e.g. after the maximum ventilation time."""
         if not self.window_open:
@@ -827,10 +838,10 @@ def evaluate_room(
         if cooling_window["time_text"]:
             next_window = (
                 f"Nächstes Lüftungsfenster: frühestens ab {cooling_window['time_text']} Uhr, wenn die Außentemperatur unter "
-                f"{cooling_window['threshold']:.1f} °C fällt."
+                f"{_de(cooling_window['threshold'])} °C fällt."
             )
         else:
-            next_window = f"Nächstes Lüftungsfenster: sobald die Außentemperatur unter {cooling_window['threshold']:.1f} °C fällt."
+            next_window = f"Nächstes Lüftungsfenster: sobald die Außentemperatur unter {_de(cooling_window['threshold'])} °C fällt."
 
     score = calculate_score(room, metrics, mold["level"]) if inputs_available else None
     humidex_value = metrics.get(CONF_HUMIDEX_VALUE)
@@ -862,10 +873,12 @@ def evaluate_room(
     mold_reason = None
     if mold_high:
         mold_reason = (
-            f"Schimmelrisiko: An kalten Außenwänden (ca. {mold['surface_temperature']:.1f} °C) erreicht die Luft "
+            f"Schimmelrisiko: An kalten Außenwänden (ca. {_de(mold['surface_temperature'])} °C) erreicht die Luft "
             f"etwa {mold['surface_humidity']:.0f} % Feuchte."
         )
-        if dehumidify_climate:
+        if dehumidify_climate and window_open:
+            mold_reason += " Das offene Fenster senkt das Risiko."
+        elif dehumidify_climate:
             mold_reason += " Stoßlüften senkt das Risiko."
         elif diff is not None and diff <= 0.3:
             mold_reason += " Die Außenluft ist zu feucht – Feuchtequellen reduzieren und den Raum nicht auskühlen lassen."
@@ -882,7 +895,7 @@ def evaluate_room(
         and inside_temp > profile["temp_max"] + 1
     ):
         reduce_heating_reason = (
-            f"Raum ist mit {inside_temp:.1f} °C wärmer als nötig (bis {profile['temp_max']:.0f} °C), "
+            f"Raum ist mit {_de(inside_temp)} °C wärmer als nötig (bis {profile['temp_max']:.0f} °C), "
             "die Heizung heizt aber noch – Solltemperatur senken."
         )
     reduce_heating = reduce_heating_reason is not None
@@ -898,7 +911,7 @@ def evaluate_room(
         and inside_temp >= cover_temp_threshold
     )
     close_cover_reason = (
-        f"Rollladen schließen. Direkter Sonneneintrag heizt den Raum bei {inside_temp:.1f} °C zusätzlich auf."
+        f"Rollladen schließen. Direkter Sonneneintrag heizt den Raum bei {_de(inside_temp)} °C zusätzlich auf."
         if close_cover and inside_temp is not None
         else None
     )
@@ -945,6 +958,8 @@ def evaluate_room(
         "comfort_humidity_min": profile["humidity_min"],
         "comfort_humidity_max": profile["humidity_max"],
         "mold_risk": mold["level"],
+        # Set to False by the coordinator until the risk has lasted a while.
+        "mold_risk_active": mold_high,
         "mold_risk_reason": mold_reason,
         "wall_surface_temperature": mold["surface_temperature"],
         "wall_surface_humidity": mold["surface_humidity"],

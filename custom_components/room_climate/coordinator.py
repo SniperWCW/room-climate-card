@@ -52,6 +52,10 @@ DAY_TYPE_LABELS = {
     "cool": ("Kühler Tag", "mdi:weather-cloudy"),
 }
 
+# Short humidity peaks (showering, cooking) are normal. A mould risk is only
+# reported once it has lasted this long.
+MOLD_CONFIRM_MINUTES = 60
+
 # A window that was just opened gets a short grace period before a
 # "close window" push is sent, e.g. when someone briefly airs the room.
 CLOSE_WINDOW_GRACE_MINUTES = 3
@@ -102,6 +106,7 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._forecast_requested_at: datetime | None = None
         self._forecast_retry_unsub = None
         self._climate_entity_cache: dict[str, str | None] = {}
+        self._mold_since: dict[str, datetime] = {}
         entry.async_on_unload(self._cancel_forecast_retry)
         self.last_notification_at: dict[str, datetime] = {}
         self.last_flag_state: dict[str, bool] = {}
@@ -561,6 +566,17 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "worst_room_score": worst_room.score if worst_room else None,
         }
 
+    def _confirm_mold_risk(self, rooms: dict[str, RoomResult], now: datetime) -> None:
+        for room_id, room in rooms.items():
+            if room.attributes.get("mold_risk") != "high":
+                self._mold_since.pop(room_id, None)
+                continue
+            since = self._mold_since.setdefault(room_id, now)
+            minutes = (now - since).total_seconds() / 60
+            room.attributes["mold_risk_minutes"] = round(minutes)
+            if minutes < MOLD_CONFIRM_MINUTES:
+                room.set_mold_pending()
+
     def _outside_absolute_humidity(self, outside_weather: dict[str, Any]) -> tuple[float | None, str | None]:
         """Use the configured sensor, otherwise calculate from the weather entity."""
         sensor_value = as_float(self._get_state(self.config.get(CONF_OUTSIDE_ABSOLUTE_HUMIDITY)))
@@ -682,6 +698,8 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             result.attributes["outside_absolute_humidity_source"] = outside_abs_source
             room_results[result.room_id] = result
+
+        self._confirm_mold_risk(room_results, dt_util.utcnow())
 
         house_ventilation = evaluate_house_ventilation(
             self.config.get(CONF_ROOMS, []),
