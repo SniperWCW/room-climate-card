@@ -91,3 +91,29 @@ async def test_stale_values_do_not_trigger_actions(hass, web_stack, config_entry
 
     assert await hass.config_entries.async_unload(config_entry.entry_id)
     await hass.async_block_till_done()
+
+
+async def test_mold_risk_needs_to_persist_before_it_is_reported(hass, web_stack, config_entry, freezer):
+    """A humidity peak after a shower must not raise the mould alarm right away."""
+    from datetime import timedelta
+
+    from homeassistant.util import dt as dt_util
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed
+
+    set_room_states(hass, temperature=20.0, humidity=62.0)
+    set_weather(hass, temperature=-5.0, humidity=90.0)
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    mold = _entity_id(hass, "binary_sensor", "wohnzimmer_mold_risk", config_entry)
+    score = _entity_id(hass, "sensor", "wohnzimmer_score", config_entry)
+    assert hass.states.get(score).attributes["mold_risk"] == "high"
+    assert hass.states.get(mold).state == "off"
+
+    freezer.tick(timedelta(minutes=65))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+    assert hass.states.get(mold).state == "on"
+
+    assert await hass.config_entries.async_unload(config_entry.entry_id)
+    await hass.async_block_till_done()
