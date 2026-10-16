@@ -1,0 +1,117 @@
+{
+  "title": "Room Climate",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Room Climate",
+        "description": "Global entities and push settings for Room Climate.",
+        "data": {
+          "name": "Name",
+          "outside_absolute_humidity": "Outdoor absolute humidity",
+          "outside_weather": "Outdoor weather entity",
+          "sun_entity": "Sun entity",
+          "notification_enabled": "Enable push notifications",
+          "notify_service": "Notify service",
+          "notification_cooldown": "Push cooldown in minutes"
+        },
+        "data_description": {
+          "outside_absolute_humidity": "Optional. Without a sensor, it is calculated from the weather entity's temperature and humidity."
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Room Climate can only be set up once."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Manage Room Climate",
+        "menu_options": {
+          "global": "Global settings",
+          "import_detected_rooms": "Select rooms from Home Assistant",
+          "add_room_manual": "Add room manually",
+          "edit_room_select": "Edit room",
+          "remove_room": "Remove room"
+        }
+      },
+      "import_detected_rooms": {
+        "title": "Select rooms from Home Assistant",
+        "data": {
+          "selected_rooms": "Rooms to import"
+        }
+      },
+      "global": {
+        "title": "Global settings",
+        "data": {
+          "name": "Name",
+          "outside_absolute_humidity": "Outdoor absolute humidity",
+          "outside_weather": "Outdoor weather entity",
+          "sun_entity": "Sun entity",
+          "notification_enabled": "Enable push notifications",
+          "notify_service": "Notify service",
+          "notification_cooldown": "Push cooldown in minutes"
+        },
+        "data_description": {
+          "outside_absolute_humidity": "Optional. Without a sensor, it is calculated from the weather entity's temperature and humidity."
+        }
+      },
+      "add_room_manual": {
+        "title": "Add room manually",
+        "data": {
+          "name": "Room name",
+          "room_type": "Room type",
+          "window_orientation": "Window orientation",
+          "temperature": "Temperature sensor",
+          "humidity": "Humidity sensor",
+          "inside_absolute_humidity": "Indoor absolute humidity",
+          "window": "Window sensor",
+          "cover": "Roller shade / cover",
+          "humidex_value": "Humidex value",
+          "scharlau": "Summer Scharlau perception",
+          "humidex": "Humidex perception",
+          "simmer": "Summer Simmer perception",
+          "dewpoint": "Dew point perception",
+          "notifications_enabled": "Enable push for this room"
+        },
+        "data_description": {
+          "inside_absolute_humidity": "Optional. Without a sensor, it is calculated from temperature and humidity."
+        }
+      },
+      "edit_room_select": {
+        "title": "Select room",
+        "data": {
+          "id": "Room"
+        }
+      },
+      "edit_room": {
+        "title": "Edit room",
+        "data": {
+          "name": "Room name",
+          "room_type": "Room type",
+          "window_orientation": "Window orientation",
+          "temperature": "Temperature sensor",
+          "humidity": "Humidity sensor",
+          "inside_absolute_humidity": "Indoor absolute humidity",
+          "window": "Window sensor",
+          "cover": "Roller shade / cover",
+          "humidex_value": "Humidex value",
+          "scharlau": "Summer Scharlau perception",
+          "humidex": "Humidex perception",
+          "simmer": "Summer Simmer perception",
+          "dewpoint": "Dew point perception",
+          "notifications_enabled": "Enable push for this room"
+        },
+        "data_description": {
+          "inside_absolute_humidity": "Optional. Without a sensor, it is calculated from temperature and humidity."
+        }
+      },
+      "remove_room": {
+        "title": "Remove room",
+        "data": {
+          "id": "Room"
+        }
+      }
+    }
+  }
+}

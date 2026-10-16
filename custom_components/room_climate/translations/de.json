@@ -4,15 +4,18 @@
     "step": {
       "user": {
         "title": "Room Climate einrichten",
-        "description": "Globale Entitaeten und Push-Einstellungen fuer Room Climate.",
+        "description": "Globale Entitäten und Push-Einstellungen für Room Climate.",
         "data": {
           "name": "Name",
-          "outside_absolute_humidity": "Absolute Aussenluftfeuchtigkeit",
-          "outside_weather": "Wetter-Entity aussen",
-          "sun_entity": "Sonnen-Entity",
+          "outside_absolute_humidity": "Absolute Außenluftfeuchtigkeit",
+          "outside_weather": "Wetter-Entität außen",
+          "sun_entity": "Sonnen-Entität",
           "notification_enabled": "Push-Benachrichtigungen aktivieren",
           "notify_service": "Notify-Service",
           "notification_cooldown": "Push-Abstand in Minuten"
+        },
+        "data_description": {
+          "outside_absolute_humidity": "Optional. Ohne Sensor wird die absolute Außenfeuchte aus Temperatur und Luftfeuchte der Wetter-Entität berechnet."
         }
       }
     },
@@ -26,32 +29,35 @@
         "title": "Room Climate verwalten",
         "menu_options": {
           "global": "Globale Einstellungen",
-          "import_detected_rooms": "Raeume aus Home Assistant auswaehlen",
-          "add_room_manual": "Raum manuell hinzufuegen",
+          "import_detected_rooms": "Räume aus Home Assistant auswählen",
+          "add_room_manual": "Raum manuell hinzufügen",
           "edit_room_select": "Raum bearbeiten",
           "remove_room": "Raum entfernen"
         }
       },
       "import_detected_rooms": {
-        "title": "Raeume aus Home Assistant auswaehlen",
+        "title": "Räume aus Home Assistant auswählen",
         "data": {
-          "selected_rooms": "Zu importierende Raeume"
+          "selected_rooms": "Zu importierende Räume"
         }
       },
       "global": {
         "title": "Globale Einstellungen",
         "data": {
           "name": "Name",
-          "outside_absolute_humidity": "Absolute Aussenluftfeuchtigkeit",
-          "outside_weather": "Wetter-Entity aussen",
-          "sun_entity": "Sonnen-Entity",
+          "outside_absolute_humidity": "Absolute Außenluftfeuchtigkeit",
+          "outside_weather": "Wetter-Entität außen",
+          "sun_entity": "Sonnen-Entität",
           "notification_enabled": "Push-Benachrichtigungen aktivieren",
           "notify_service": "Notify-Service",
           "notification_cooldown": "Push-Abstand in Minuten"
+        },
+        "data_description": {
+          "outside_absolute_humidity": "Optional. Ohne Sensor wird die absolute Außenfeuchte aus Temperatur und Luftfeuchte der Wetter-Entität berechnet."
         }
       },
       "add_room_manual": {
-        "title": "Raum manuell hinzufuegen",
+        "title": "Raum manuell hinzufügen",
         "data": {
           "name": "Raumname",
           "room_type": "Raumtyp",
@@ -62,15 +68,18 @@
           "window": "Fenstersensor",
           "cover": "Rollladen/Cover",
           "humidex_value": "Humidex Wert",
-          "scharlau": "Sommer Scharlau gefuehlt",
-          "humidex": "Humidex gefuehlt",
-          "simmer": "Sommer Simmer gefuehlt",
-          "dewpoint": "Taupunkt gefuehlt",
-          "notifications_enabled": "Push fuer diesen Raum aktivieren"
+          "scharlau": "Sommer Scharlau gefühlt",
+          "humidex": "Humidex gefühlt",
+          "simmer": "Sommer Simmer gefühlt",
+          "dewpoint": "Taupunkt gefühlt",
+          "notifications_enabled": "Push für diesen Raum aktivieren"
+        },
+        "data_description": {
+          "inside_absolute_humidity": "Optional. Ohne Sensor wird der Wert aus Temperatur und Luftfeuchtigkeit berechnet."
         }
       },
       "edit_room_select": {
-        "title": "Raum auswaehlen",
+        "title": "Raum auswählen",
         "data": {
           "id": "Raum"
         }
@@ -87,11 +96,14 @@
           "window": "Fenstersensor",
           "cover": "Rollladen/Cover",
           "humidex_value": "Humidex Wert",
-          "scharlau": "Sommer Scharlau gefuehlt",
-          "humidex": "Humidex gefuehlt",
-          "simmer": "Sommer Simmer gefuehlt",
-          "dewpoint": "Taupunkt gefuehlt",
-          "notifications_enabled": "Push fuer diesen Raum aktivieren"
+          "scharlau": "Sommer Scharlau gefühlt",
+          "humidex": "Humidex gefühlt",
+          "simmer": "Sommer Simmer gefühlt",
+          "dewpoint": "Taupunkt gefühlt",
+          "notifications_enabled": "Push für diesen Raum aktivieren"
+        },
+        "data_description": {
+          "inside_absolute_humidity": "Optional. Ohne Sensor wird der Wert aus Temperatur und Luftfeuchtigkeit berechnet."
         }
       },
       "remove_room": {

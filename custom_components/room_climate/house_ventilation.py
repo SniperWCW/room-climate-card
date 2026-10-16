@@ -68,9 +68,38 @@ def _parse_datetime(value: Any) -> datetime | None:
     return parsed
 
 
-def _angular_difference(first: float, second: float) -> float:
+WEEKDAYS = ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
+
+
+def day_prefix(value: datetime, now: datetime) -> str:
+    """Return a short German day hint for times that are not today."""
+    days = (value.date() - now.date()).days
+    if days == 0:
+        return ""
+    if days == 1:
+        return "morgen "
+    if days == 2:
+        return "übermorgen "
+    return f"{WEEKDAYS[value.weekday()]} "
+
+
+def format_time_range(start: datetime, end: datetime, now: datetime) -> str:
+    """Format a forecast window like "morgen 06:00–08:00 Uhr"."""
+    timezone_info = now.tzinfo or timezone.utc
+    local_start = start.astimezone(timezone_info)
+    local_end = end.astimezone(timezone_info)
+    return (
+        f"{day_prefix(local_start, now)}{local_start.strftime('%H:%M')}–"
+        f"{local_end.strftime('%H:%M')} Uhr"
+    )
+
+
+def angular_difference(first: float, second: float) -> float:
     difference = abs(first - second) % 360
     return 360 - difference if difference > 180 else difference
+
+
+_angular_difference = angular_difference
 
 
 def _configured_window_sides(rooms: list[dict[str, Any]]) -> dict[str, list[str]]:
@@ -192,7 +221,8 @@ def _forecast_window(
     forecast_limit = now + timedelta(hours=MAX_FORECAST_HOURS)
     for entry in forecast:
         entry_time = _parse_datetime(entry.get("datetime"))
-        if entry_time is None or entry_time < now or entry_time > forecast_limit:
+        # Keep the slot that is currently running (e.g. 08:00 when it is 08:20).
+        if entry_time is None or entry_time + timedelta(hours=1) <= now or entry_time > forecast_limit:
             continue
 
         temperature = _as_float(entry.get("temperature"))
@@ -265,10 +295,7 @@ def _forecast_window(
         available=True,
         start=start.isoformat(),
         end=end.isoformat(),
-        label=(
-            f"{start.astimezone(display_timezone).strftime('%H:%M')}–"
-            f"{end.astimezone(display_timezone).strftime('%H:%M')} Uhr"
-        ),
+        label=format_time_range(start, end, now.astimezone(display_timezone)),
         reason="Außenluft bietet in diesem Zeitraum den besten Feuchte- und Temperaturvorteil.",
         expected_temperature=round(best_entry["temperature"], 1) if best_entry["temperature"] is not None else None,
         expected_absolute_humidity=(
@@ -312,11 +339,6 @@ def evaluate_house_ventilation(
         if inside_absolute_humidity is not None and outside_absolute_humidity is not None
         else None
     )
-    cooling_delta = (
-        inside_temperature - outside_temperature
-        if inside_temperature is not None and outside_temperature is not None
-        else None
-    )
 
     sides = _configured_window_sides(configured_rooms)
     cross_pair = _best_cross_pair(sides)
@@ -335,19 +357,16 @@ def evaluate_house_ventilation(
     recommended_rooms = [
         room.name
         for room in usable_rooms
-        if room.attributes.get("ventilation_beneficial", room.ventilate_now)
+        if room.attributes.get(
+            "outside_air_beneficial",
+            room.attributes.get("ventilation_beneficial", room.ventilate_now),
+        )
     ]
-    cooling = (
-        inside_temperature is not None
-        and inside_temperature >= 24
-        and cooling_delta is not None
-        and cooling_delta >= MIN_COOLING_DELTA
-        and (humidity_delta is None or humidity_delta >= -0.8)
-    )
-    # The humidity difference alone is not a reason to ventilate. At least one
-    # room must currently request ventilation, unless there is a clear cooling
-    # benefit for the house.
-    beneficial = bool(recommended_rooms or cooling)
+    # The house-wide recommendation is derived from the per-room decisions only.
+    # A separate house-level cooling rule with its own thresholds previously
+    # recommended ventilation that the rooms immediately rejected once a window
+    # was opened ("Stoßlüften empfohlen" followed by "Lüften beenden").
+    beneficial = bool(recommended_rooms)
     recommended_orientations = (
         [ORIENTATION_LABEL[item] for item in cross_pair] if cross_pair and beneficial else []
     )

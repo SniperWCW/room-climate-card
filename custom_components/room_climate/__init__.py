@@ -7,12 +7,14 @@ from homeassistant.components.frontend import add_extra_js_url, remove_extra_js_
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
 
 from .const import CARD_FILENAME, CARD_URL_PATH, CONF_ROOMS, DOMAIN, PLATFORMS
 from .coordinator import IntegrationData, RoomClimateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+# Configured through the UI only; required by hassfest because async_setup exists.
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 ROOM_ENTITY_SUFFIXES = (
     "_score",
     "_recommendation",

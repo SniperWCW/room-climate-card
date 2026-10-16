@@ -98,3 +98,21 @@ def test_cold_weather_caps_session_and_closing_clears_it():
     assert finished[0]["phase"] == "finish"
     assert sessions == {}
     assert closed == []
+
+
+def test_session_of_unavailable_window_expires():
+    now = datetime(2026, 9, 18, 18, tzinfo=timezone.utc)
+    sessions = {
+        "recent": {"started_at": (now - timedelta(minutes=30)).isoformat(), "planned_minutes": 8, "max_minutes": 20, "finished": False},
+        "old": {"started_at": (now - timedelta(hours=3)).isoformat(), "planned_minutes": 8, "max_minutes": 20, "finished": False},
+    }
+    results = ventilation_session.update_sessions(
+        sessions,
+        {"recent": ("unavailable", now), "old": ("unavailable", now)},
+        {},
+        now,
+        8,
+        12.0,
+    )
+    assert results == []
+    assert set(sessions) == {"recent"}

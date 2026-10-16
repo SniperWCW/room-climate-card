@@ -13,6 +13,9 @@ Features:
 - immediate updates when a configured window contact changes
 - restart-safe ventilation countdown with continued-benefit and close-window guidance
 - forecast windows evaluated from temperature and absolute humidity
+- absolute humidity calculated from temperature and relative humidity when no dedicated sensor is configured (inside and outside)
+- cooling thresholds derived from each room profile (comfort maximum + 2 °C); basements are never ventilated for cooling
+- hysteresis while a window is open, so advice does not flip around a threshold
 - house-wide daily briefing with weather-based day type and prioritised actions
 - optional `sun.sun` and window orientation handling
 - binary sensors for:
@@ -50,7 +53,7 @@ For the whole installation, the integration creates:
 
 The day briefing classifies the next 24 hours as a cool, mild, summer, or hot day. Its attributes contain the forecast range, average room score, most affected room, and a ready-to-use action summary for dashboards and automations. The bundled card displays this briefing automatically.
 
-The house-wide ventilation sensor combines the configured room windows and their orientations. Opposing orientations are used for cross-ventilation guidance. When a window opens, its state updates immediately and a restart-safe countdown begins. Current room values are checked throughout the session, so the recommendation changes to `Lüften beenden` as soon as the outside-air advantage ends. If the advantage still exists after the calculated minimum time, it changes to `Weiterlüften`. A maximum of 10 minutes in cold weather and 20 minutes otherwise prevents an open-ended recommendation. The forecast sensor calculates expected absolute humidity from hourly temperature and relative humidity and groups suitable hours into one recommended window. Both recommendations are also displayed as separate blocks in the bundled card.
+The house-wide ventilation sensor is derived from the per-room decisions, so it never recommends ventilation that the rooms would reject. It combines the configured room windows and their orientations. Opposing orientations are used for cross-ventilation guidance. When a window opens, its state updates immediately and a restart-safe countdown begins. Current room values are checked throughout the session, so the recommendation changes to `Lüften beenden` as soon as the outside-air advantage ends. If the advantage still exists after the calculated minimum time, it changes to `Weiterlüften`. A maximum of 10 minutes in cold weather (below 5 °C) and 20 minutes otherwise prevents an open-ended recommendation. When a session ends, the room's `close_window` binary sensor turns on and a push notification is sent. The sensor state only changes with the phase; the remaining minutes are available in the `session_detail` and `session_remaining_minutes` attributes. The forecast sensor calculates expected absolute humidity from hourly temperature and relative humidity and groups suitable hours into one recommended window. Both recommendations are also displayed as separate blocks in the bundled card.
 
 For each configured room, the integration creates:
 
@@ -63,7 +66,10 @@ For each configured room, the integration creates:
 ## Notes
 
 - Push notifications are sent only when the recommendation changes from inactive to active.
-- A configurable cooldown prevents repeated notifications.
-- The `Score` exposes `inputs_available` and `data_quality`. A score is only calculated when current room temperature and humidity readings are available; source readings older than 15 minutes are marked `stale`.
+- A configurable cooldown prevents repeated notifications. "Close window" pushes wait until the window has been open for 3 minutes.
+- The `Score` exposes `inputs_available` and `data_quality`. A score is only calculated when current room temperature and humidity readings are available; readings that have not been reported for more than 3 hours are marked `stale`. Missing or stale readings never trigger ventilation, close-window or cover actions.
+- The score uses Thermal Comfort sensors (Scharlau, Humidex, dew point, Simmer) when configured. Without them it is calculated from temperature and humidity against the room profile, so rooms without these sensors can still reach "Ideal".
+- Weather values are converted to °C and km/h regardless of the units of the weather entity.
+- Requires Home Assistant 2025.2 or newer.
 - Regular calculations run every five minutes. Window changes trigger an immediate refresh, and an active ventilation session refreshes once per minute.
 - The bundled Lovelace card is still useful for rich per-room display, while the integration handles backend logic and automation-friendly entities.

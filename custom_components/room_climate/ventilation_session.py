@@ -12,6 +12,10 @@ CLOSED_STATES = {"off", "closed"}
 DEFAULT_PLANNED_MINUTES = 10
 MAX_COLD_MINUTES = 10
 MAX_MILD_MINUTES = 20
+# Sessions of window contacts that dropped to unknown/unavailable are kept for
+# a while, so a short radio dropout does not restart the countdown, but they do
+# not linger forever.
+STALE_SESSION_MINUTES = 120
 
 
 def _parse_datetime(value: Any) -> datetime | None:
@@ -46,6 +50,16 @@ def update_sessions(
         state = windows.get(room_id, ("closed", now))[0]
         if room_id not in windows or state in CLOSED_STATES:
             sessions.pop(room_id)
+            continue
+        if state not in OPEN_STATES:
+            session = sessions[room_id]
+            started_at = (
+                _parse_datetime(session.get("started_at"))
+                if isinstance(session, dict)
+                else None
+            )
+            if started_at is None or (now - started_at).total_seconds() / 60 > STALE_SESSION_MINUTES:
+                sessions.pop(room_id)
 
     results: list[dict[str, Any]] = []
     for room_id, (state, changed) in windows.items():
