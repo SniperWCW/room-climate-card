@@ -12,10 +12,12 @@
           "sun_entity": "Sun entity",
           "notification_enabled": "Enable push notifications",
           "notify_service": "Notify service",
-          "notification_cooldown": "Push cooldown in minutes"
+          "notification_cooldown": "Push cooldown in minutes",
+          "wall_quality": "Exterior wall insulation"
         },
         "data_description": {
-          "outside_absolute_humidity": "Optional. Without a sensor, it is calculated from the weather entity's temperature and humidity."
+          "outside_absolute_humidity": "Optional. Without a sensor, it is calculated from the weather entity's temperature and humidity.",
+          "wall_quality": "How cold exterior walls get in winter. Used to estimate the mould risk."
         }
       }
     },
@@ -50,10 +52,12 @@
           "sun_entity": "Sun entity",
           "notification_enabled": "Enable push notifications",
           "notify_service": "Notify service",
-          "notification_cooldown": "Push cooldown in minutes"
+          "notification_cooldown": "Push cooldown in minutes",
+          "wall_quality": "Exterior wall insulation"
         },
         "data_description": {
-          "outside_absolute_humidity": "Optional. Without a sensor, it is calculated from the weather entity's temperature and humidity."
+          "outside_absolute_humidity": "Optional. Without a sensor, it is calculated from the weather entity's temperature and humidity.",
+          "wall_quality": "How cold exterior walls get in winter. Used to estimate the mould risk."
         }
       },
       "add_room_manual": {
@@ -72,10 +76,12 @@
           "humidex": "Humidex perception",
           "simmer": "Summer Simmer perception",
           "dewpoint": "Dew point perception",
-          "notifications_enabled": "Enable push for this room"
+          "notifications_enabled": "Enable push for this room",
+          "climate": "Thermostat / heating"
         },
         "data_description": {
-          "inside_absolute_humidity": "Optional. Without a sensor, it is calculated from temperature and humidity."
+          "inside_absolute_humidity": "Optional. Without a sensor, it is calculated from temperature and humidity.",
+          "climate": "Optional. Enables hints to turn down the heating and detects the heating season."
         }
       },
       "edit_room_select": {
@@ -100,10 +106,12 @@
           "humidex": "Humidex perception",
           "simmer": "Summer Simmer perception",
           "dewpoint": "Dew point perception",
-          "notifications_enabled": "Enable push for this room"
+          "notifications_enabled": "Enable push for this room",
+          "climate": "Thermostat / heating"
         },
         "data_description": {
-          "inside_absolute_humidity": "Optional. Without a sensor, it is calculated from temperature and humidity."
+          "inside_absolute_humidity": "Optional. Without a sensor, it is calculated from temperature and humidity.",
+          "climate": "Optional. Enables hints to turn down the heating and detects the heating season."
         }
       },
       "remove_room": {
@@ -111,6 +119,68 @@
         "data": {
           "id": "Room"
         }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "overview": {
+        "name": "Day briefing",
+        "state": {
+          "hot": "Hot day",
+          "summer": "Summer day",
+          "mild": "Mild day",
+          "cool": "Cool day"
+        }
+      },
+      "house_ventilation": {
+        "name": "House ventilation",
+        "state": {
+          "unknown": "Cannot be evaluated",
+          "keep_windows_closed": "Do not ventilate",
+          "shock_ventilation_recommended": "Burst ventilation recommended",
+          "cross_ventilation_recommended": "Cross ventilation recommended",
+          "ventilation_active": "Ventilating",
+          "cross_ventilation_active": "Cross ventilating",
+          "ventilation_active_limited": "Ventilating (no room values)",
+          "ventilation_continue": "Keep ventilating",
+          "close_windows": "Close windows"
+        }
+      },
+      "next_ventilation_window": {
+        "name": "Next ventilation window"
+      },
+      "score": {
+        "name": "Score"
+      },
+      "recommendation": {
+        "name": "Recommendation",
+        "state": {
+          "excellent": "Ideal",
+          "good": "Comfortable",
+          "medium": "Okay",
+          "warning": "Straining",
+          "bad": "Poor",
+          "critical": "Critical",
+          "unknown": "Unknown"
+        }
+      }
+    },
+    "binary_sensor": {
+      "ventilate_now": {
+        "name": "Ventilate now"
+      },
+      "close_window": {
+        "name": "Close window"
+      },
+      "close_cover": {
+        "name": "Close cover"
+      },
+      "mold_risk": {
+        "name": "Mould risk"
+      },
+      "reduce_heating": {
+        "name": "Reduce heating"
       }
     }
   }

@@ -28,6 +28,18 @@ CONF_DEWPOINT = "dewpoint"
 CONF_WINDOW = "window"
 CONF_COVER = "cover"
 CONF_ROOM_NOTIFICATIONS = "notifications_enabled"
+CONF_CLIMATE = "climate"
+CONF_WALL_QUALITY = "wall_quality"
+
+# Temperature factor f_Rsi of the coldest relevant wall surface (DIN 4108-2):
+# surface = outside + f_Rsi * (inside - outside). 0.7 is the minimum required
+# for new buildings at thermal bridges; older buildings are often worse.
+WALL_QUALITY_FACTORS = {
+    "old": 0.6,
+    "standard": 0.7,
+    "good": 0.8,
+}
+DEFAULT_WALL_QUALITY = "standard"
 
 DEFAULT_NAME = "Room Climate"
 DEFAULT_NOTIFICATION_ENABLED = True
@@ -58,3 +70,31 @@ WINDOW_ORIENTATION_OPTIONS = ["", "N", "NO", "O", "SO", "S", "SW", "W", "NW"]
 NOTIFICATION_VENTILATE = "ventilate_now"
 NOTIFICATION_CLOSE_WINDOW = "close_window"
 NOTIFICATION_CLOSE_COVER = "close_cover"
+NOTIFICATION_MOLD_RISK = "mold_risk"
+
+# Optional room entities; an explicit "" means "none" and disables auto-detection.
+OPTIONAL_ROOM_ENTITY_KEYS = (
+    "inside_absolute_humidity",
+    "window",
+    "cover",
+    "climate",
+    "humidex_value",
+    "scharlau",
+    "humidex",
+    "simmer",
+    "dewpoint",
+)
+
+HOUSE_VENTILATION_MODES = [
+    "unknown",
+    "keep_windows_closed",
+    "shock_ventilation_recommended",
+    "cross_ventilation_recommended",
+    "ventilation_active",
+    "cross_ventilation_active",
+    "ventilation_active_limited",
+    "ventilation_continue",
+    "close_windows",
+]
+DAY_TYPES = ["hot", "summer", "mild", "cool"]
+LEVEL_CLASSES = ["excellent", "good", "medium", "warning", "bad", "critical", "unknown"]

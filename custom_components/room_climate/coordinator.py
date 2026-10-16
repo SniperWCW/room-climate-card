@@ -1,19 +1,27 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
+from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers.event import (
+    async_call_later,
+    async_track_state_change_event,
+    async_track_time_interval,
+)
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_CLIMATE,
+    CONF_WALL_QUALITY,
+    DEFAULT_WALL_QUALITY,
+    NOTIFICATION_MOLD_RISK,
     CONF_NOTIFICATION_COOLDOWN,
     CONF_NOTIFICATION_ENABLED,
     CONF_NOTIFY_SERVICE,
@@ -33,6 +41,20 @@ from .ventilation_session import OPEN_STATES, update_sessions
 from .logic import RoomResult, as_float, evaluate_room
 
 _LOGGER = logging.getLogger(__name__)
+
+# Retry quickly when the weather entity is not ready yet (e.g. right after a
+# restart) instead of waiting for the next regular forecast refresh.
+FORECAST_RETRY_SECONDS = 30
+DAY_TYPE_LABELS = {
+    "hot": ("Hitzetag", "mdi:weather-sunny-alert"),
+    "summer": ("Sommertag", "mdi:weather-sunny"),
+    "mild": ("Milder Tag", "mdi:weather-partly-cloudy"),
+    "cool": ("Kühler Tag", "mdi:weather-cloudy"),
+}
+
+# Short humidity peaks (showering, cooking) are normal. A mould risk is only
+# reported once it has lasted this long.
+MOLD_CONFIRM_MINUTES = 60
 
 # A window that was just opened gets a short grace period before a
 # "close window" push is sent, e.g. when someone briefly airs the room.
@@ -63,9 +85,7 @@ def _wind_to_kmh(value: float | None, unit: str | None) -> float | None:
     return value * _WIND_TO_KMH.get(unit or "km/h", 1.0)
 
 
-@dataclass(slots=True)
-class IntegrationData:
-    coordinator: "RoomClimateCoordinator"
+type RoomClimateConfigEntry = ConfigEntry["RoomClimateCoordinator"]
 
 
 class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -73,6 +93,7 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=f"{DOMAIN}_{entry.entry_id}",
             update_interval=DEFAULT_SCAN_INTERVAL,
         )
@@ -83,6 +104,10 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._forecast_cache: list[dict[str, Any]] = []
         self._forecast_requested_at: datetime | None = None
+        self._forecast_retry_unsub = None
+        self._climate_entity_cache: dict[str, str | None] = {}
+        self._mold_since: dict[str, datetime] = {}
+        entry.async_on_unload(self._cancel_forecast_retry)
         self.last_notification_at: dict[str, datetime] = {}
         self.last_flag_state: dict[str, bool] = {}
         self._notification_store = Store[dict[str, Any]](
@@ -115,7 +140,24 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await super().async_config_entry_first_refresh()
 
     def start_window_tracking(self) -> None:
-        """Refresh on contact transitions and every minute while windows are open."""
+        """Refresh on contact transitions and every minute while windows are open.
+
+        Also reload the forecast as soon as the weather entity becomes available,
+        so the forecast is not missing for minutes after a restart.
+        """
+        weather_entity = self.config.get(CONF_OUTSIDE_WEATHER)
+        if weather_entity:
+
+            async def weather_changed(event) -> None:
+                old = event.data.get("old_state")
+                if not self._forecast_cache and (old is None or old.state in {"unavailable", "unknown"}):
+                    self._forecast_requested_at = None
+                    await self.async_request_refresh()
+
+            self.entry.async_on_unload(
+                async_track_state_change_event(self.hass, [weather_entity], weather_changed)
+            )
+
         entities = {
             room["window"]
             for room in self.config.get(CONF_ROOMS, [])
@@ -190,6 +232,7 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("Forecast lookup failed for %s: %s", entity_id, err)
             self._forecast_cache = []
+            self._schedule_forecast_retry()
             return []
 
         payload = response.get(entity_id, {}) if isinstance(response, dict) else {}
@@ -211,7 +254,75 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 item["wind_speed"] = _wind_to_kmh(as_float(item["wind_speed"]), wind_unit)
             normalized.append(item)
         self._forecast_cache = normalized
+        if not normalized:
+            self._schedule_forecast_retry()
         return self._forecast_cache
+
+    def _schedule_forecast_retry(self) -> None:
+        if self._forecast_retry_unsub is not None:
+            return
+
+        async def retry(_now: datetime) -> None:
+            self._forecast_retry_unsub = None
+            self._forecast_requested_at = None
+            await self.async_request_refresh()
+
+        self._forecast_retry_unsub = async_call_later(self.hass, FORECAST_RETRY_SECONDS, retry)
+
+    def _cancel_forecast_retry(self) -> None:
+        if self._forecast_retry_unsub is not None:
+            self._forecast_retry_unsub()
+            self._forecast_retry_unsub = None
+
+    def _resolve_climate_entity(self, room: dict[str, Any]) -> str | None:
+        """Return the room's thermostat.
+
+        Rooms configured before thermostats were supported have no "climate"
+        key; for them the thermostat in the same area as the temperature sensor
+        is used. An explicit empty value means "no thermostat".
+        """
+        if CONF_CLIMATE in room:
+            return room.get(CONF_CLIMATE) or None
+        room_id = room.get("id", "")
+        if room_id in self._climate_entity_cache:
+            return self._climate_entity_cache[room_id]
+        entity_registry = er.async_get(self.hass)
+        device_registry = dr.async_get(self.hass)
+
+        def area_of(entity_id: str | None) -> str | None:
+            entry = entity_registry.async_get(entity_id) if entity_id else None
+            if entry is None:
+                return None
+            if entry.area_id:
+                return entry.area_id
+            device = device_registry.async_get(entry.device_id) if entry.device_id else None
+            return device.area_id if device else None
+
+        area_id = area_of(room.get("temperature"))
+        found = None
+        if area_id:
+            found = next(
+                (
+                    entry.entity_id
+                    for entry in er.async_entries_for_area(entity_registry, area_id)
+                    if entry.domain == "climate" and not entry.disabled_by
+                ),
+                None,
+            )
+            if found is None:
+                for device in dr.async_entries_for_area(device_registry, area_id):
+                    found = next(
+                        (
+                            entry.entity_id
+                            for entry in er.async_entries_for_device(entity_registry, device.id)
+                            if entry.domain == "climate" and not entry.disabled_by
+                        ),
+                        None,
+                    )
+                    if found:
+                        break
+        self._climate_entity_cache[room_id] = found
+        return found
 
     def _collect_outside_weather(self) -> dict[str, Any]:
         entity_id = self.config.get(CONF_OUTSIDE_WEATHER)
@@ -283,6 +394,19 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             calculated = absolute_humidity(metrics.get("temperature"), metrics.get("humidity"))
             metrics["inside_absolute_humidity"] = round(calculated, 2) if calculated is not None else None
             metrics["inside_absolute_humidity_source"] = "calculated" if calculated is not None else None
+        climate_entity = self._resolve_climate_entity(room)
+        climate_state = self.hass.states.get(climate_entity) if climate_entity else None
+        metrics["climate_entity"] = climate_entity
+        metrics["climate"] = (
+            {
+                "state": climate_state.state,
+                "hvac_action": climate_state.attributes.get("hvac_action"),
+                "target_temperature": climate_state.attributes.get("temperature"),
+                "current_temperature": climate_state.attributes.get("current_temperature"),
+            }
+            if climate_state
+            else None
+        )
         metrics["input_age_minutes"] = primary_input_ages
         metrics["inputs_available"] = not missing_inputs and not stale_inputs
         metrics["data_quality"] = (
@@ -306,6 +430,7 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             NOTIFICATION_CLOSE_WINDOW: room.close_window_reason
             or "Fenster wieder schließen. Die aktuelle Außenluft bringt keinen Vorteil mehr.",
             NOTIFICATION_CLOSE_COVER: "Rollladen schließen empfohlen. Direkter Sonneneintrag heizt den Raum aktuell weiter auf.",
+            NOTIFICATION_MOLD_RISK: room.mold_risk_reason or "Schimmelrisiko an kalten Wänden. Bitte lüften und gleichmäßig heizen.",
         }
         message = message_map[notification_type]
 
@@ -344,6 +469,7 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 NOTIFICATION_VENTILATE: room.ventilate_now,
                 NOTIFICATION_CLOSE_WINDOW: close_window_due,
                 NOTIFICATION_CLOSE_COVER: room.close_cover,
+                NOTIFICATION_MOLD_RISK: room.mold_risk,
             }
 
             for notification_type, is_active in flags.items():
@@ -384,13 +510,14 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         low = min(temperatures) if temperatures else current_temperature
 
         if high is not None and high >= 30:
-            day_type, icon = "Hitzetag", "mdi:weather-sunny-alert"
+            day_type_key = "hot"
         elif high is not None and high >= 25:
-            day_type, icon = "Sommertag", "mdi:weather-sunny"
+            day_type_key = "summer"
         elif high is not None and high >= 18:
-            day_type, icon = "Milder Tag", "mdi:weather-partly-cloudy"
+            day_type_key = "mild"
         else:
-            day_type, icon = "Kühler Tag", "mdi:weather-cloudy"
+            day_type_key = "cool"
+        day_type, icon = DAY_TYPE_LABELS[day_type_key]
 
         ventilate = [room.name for room in rooms.values() if room.ventilate_now]
         close_windows = [room.name for room in rooms.values() if room.close_window]
@@ -402,9 +529,15 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             actions.append(f"Sonne aussperren: {', '.join(close_covers)}.")
         if close_windows:
             actions.append(f"Fenster schließen: {', '.join(close_windows)}.")
+        mold_rooms = [room.name for room in rooms.values() if room.mold_risk]
+        if mold_rooms:
+            actions.append(f"Schimmelrisiko beachten: {', '.join(mold_rooms)}.")
+        reduce_heating = [room.name for room in rooms.values() if room.reduce_heating]
+        if reduce_heating:
+            actions.append(f"Heizung herunterregeln: {', '.join(reduce_heating)}.")
 
         if not actions:
-            if day_type in {"Hitzetag", "Sommertag"}:
+            if day_type_key in {"hot", "summer"}:
                 actions.append("Tagsüber Fenster und Beschattung geschlossen halten; zum Abkühlen das nächste Lüftungsfenster abwarten.")
             else:
                 actions.append("Aktuell besteht keine vorrangige Maßnahme.")
@@ -414,6 +547,10 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         worst_room = min(scored_rooms, key=lambda room: room.score, default=None)
         return {
             "day_type": day_type,
+            "day_type_key": day_type_key,
+            "has_actions": bool(ventilate or close_windows or close_covers or mold_rooms or reduce_heating),
+            "mold_risk_count": len(mold_rooms),
+            "reduce_heating_count": len(reduce_heating),
             "icon": icon,
             "summary": " ".join(actions),
             "actions": actions,
@@ -428,6 +565,17 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "worst_room": worst_room.name if worst_room else None,
             "worst_room_score": worst_room.score if worst_room else None,
         }
+
+    def _confirm_mold_risk(self, rooms: dict[str, RoomResult], now: datetime) -> None:
+        for room_id, room in rooms.items():
+            if room.attributes.get("mold_risk") != "high":
+                self._mold_since.pop(room_id, None)
+                continue
+            since = self._mold_since.setdefault(room_id, now)
+            minutes = (now - since).total_seconds() / 60
+            room.attributes["mold_risk_minutes"] = round(minutes)
+            if minutes < MOLD_CONFIRM_MINUTES:
+                room.set_mold_pending()
 
     def _outside_absolute_humidity(self, outside_weather: dict[str, Any]) -> tuple[float | None, str | None]:
         """Use the configured sensor, otherwise calculate from the weather entity."""
@@ -539,9 +687,19 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         room_results: dict[str, RoomResult] = {}
         for room in self.config.get(CONF_ROOMS, []):
             metrics = self._collect_room_metrics(room)
-            result = evaluate_room(room, metrics, outside_abs, outside_weather, sun, forecast)
+            result = evaluate_room(
+                room,
+                metrics,
+                outside_abs,
+                outside_weather,
+                sun,
+                forecast,
+                self.config.get(CONF_WALL_QUALITY, DEFAULT_WALL_QUALITY),
+            )
             result.attributes["outside_absolute_humidity_source"] = outside_abs_source
             room_results[result.room_id] = result
+
+        self._confirm_mold_risk(room_results, dt_util.utcnow())
 
         house_ventilation = evaluate_house_ventilation(
             self.config.get(CONF_ROOMS, []),

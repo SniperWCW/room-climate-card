@@ -17,8 +17,12 @@ PACKAGE_DIR = Path(__file__).parents[1] / "custom_components" / "room_climate"
 
 
 def _install_homeassistant_stub() -> None:
-    if "homeassistant.util.dt" in sys.modules:
+    try:  # Use the real Home Assistant when it is installed (integration tests).
+        import homeassistant.util.dt  # noqa: F401
+
         return
+    except ImportError:
+        pass
     homeassistant = types.ModuleType("homeassistant")
     util = types.ModuleType("homeassistant.util")
     dt = types.ModuleType("homeassistant.util.dt")
@@ -221,3 +225,62 @@ def test_summer_night_cooling_still_recommended():
     bedroom = {**ROOM, "room_type": "bedroom"}
     result = _evaluate(_metrics(26.0, 50.0), _weather(16.0, 60.0), bedroom)
     assert result.ventilate_now is True
+
+
+def test_bedroom_slightly_above_profile_is_not_ideal():
+    """Regression: a 22 °C bedroom (profile up to 20 °C) scored 100 with comfort sensors."""
+    metrics = {
+        "temperature": 22.2,
+        "humidity": 49.0,
+        "scharlau": "comfortable",
+        "humidex": "comfortable",
+        "simmer": "comfortable",
+        "dewpoint": "very_comfortable",
+    }
+    assert logic.calculate_score({"room_type": "bedroom"}, metrics) < 90
+    assert logic.calculate_score({"room_type": "living"}, {**metrics, "temperature": 21.4}) == 100
+
+
+def test_mold_risk_on_cold_walls():
+    risk = logic.get_mold_risk(20.0, 60.0, 0.0, 0.7)
+    assert risk["level"] == "high"
+    assert risk["surface_temperature"] == 14.0
+    assert risk["surface_humidity"] > 80
+    assert logic.get_mold_risk(21.0, 45.0, 10.0, 0.7)["level"] == "low"
+    # Better insulated walls stay warmer.
+    assert logic.get_mold_risk(20.0, 60.0, 0.0, 0.8)["surface_humidity"] < risk["surface_humidity"]
+
+
+def test_mold_risk_makes_drying_worthwhile_below_humidity_maximum():
+    # 54 % is below the living room maximum of 55 %, but the walls are cold.
+    weather = _weather(-2.0, 85.0)
+    result = _evaluate(_metrics(20.0, 54.0), weather)
+    assert result.mold_risk is True
+    assert result.ventilate_now is True
+    assert "Schimmelrisiko" in result.mold_risk_reason
+    assert result.attributes["notification_flags"]["mold_risk"] is True
+
+
+def test_open_window_with_heating_on_suggests_turning_it_down():
+    metrics = _metrics(21.0, 50.0, window="on")
+    metrics["climate"] = {"state": "heat", "hvac_action": "heating", "target_temperature": 21, "current_temperature": 20.5}
+    result = _evaluate(metrics, _weather(5.0, 80.0))
+    assert result.reduce_heating is True
+    assert "Fenster offen" in result.reduce_heating_reason
+
+
+def test_frost_protection_is_not_reported_as_heating():
+    metrics = _metrics(21.0, 50.0, window="on")
+    metrics["climate"] = {"state": "heat", "hvac_action": "idle", "target_temperature": 7, "current_temperature": 20.5}
+    assert _evaluate(metrics, _weather(5.0, 80.0)).reduce_heating is False
+
+
+def test_heating_thermostat_blocks_cooling_advice_on_mild_days():
+    # 16 °C outside is above the heating-season threshold, but the thermostat
+    # is actually heating, so ventilating to cool would waste energy.
+    metrics = _metrics(25.0, 45.0)
+    metrics["climate"] = {"state": "heat", "hvac_action": "heating", "target_temperature": 26, "current_temperature": 25}
+    result = _evaluate(metrics, _weather(16.0, 60.0))
+    assert result.ventilate_now is False
+    assert "Heizung läuft" in result.attributes["cooling_advice"]
+    assert result.reduce_heating is True

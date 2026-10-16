@@ -18,10 +18,14 @@ Features:
 - hysteresis while a window is open, so advice does not flip around a threshold
 - house-wide daily briefing with weather-based day type and prioritised actions
 - optional `sun.sun` and window orientation handling
+- mould risk estimate: relative humidity at the coldest exterior wall (DIN 4108-2 temperature factor, configurable wall insulation); reported once it has lasted 60 minutes, so a shower does not raise an alarm
+- optional thermostat per room (auto-detected from the room's area): heating-season detection and hints to turn the heating down while a window is open or the room is too warm
 - binary sensors for:
   - ventilate now
   - close window
   - close cover / roller shade
+  - mould risk
+  - reduce heating
 - optional push notifications via any `notify.*` service
 - bundled `custom:room-climate-card` auto-loaded by the integration
 
@@ -37,7 +41,14 @@ After restart:
 
 ```yaml
 type: custom:room-climate-card
+# optional
+title: Raumklima
+mode: detailed   # detailed | compact | grouped (list)
+columns: 2
+sort: attention  # attention (rooms that need action first) | name
 ```
+
+The card lists only actionable advice per room and shows "Kein Handlungsbedarf" otherwise. The old card-only configuration with a `rooms:` list still works but is deprecated and will be removed in a future version.
 
 You do not need to add a separate Lovelace resource manually. The integration registers the card automatically.
 
@@ -73,3 +84,24 @@ For each configured room, the integration creates:
 - Requires Home Assistant 2025.2 or newer.
 - Regular calculations run every five minutes. Window changes trigger an immediate refresh, and an active ventilation session refreshes once per minute.
 - The bundled Lovelace card is still useful for rich per-room display, while the integration handles backend logic and automation-friendly entities.
+
+## Stable states for automations
+
+Since 0.4 these sensors use stable keys as state (shown translated in the UI):
+
+| Sensor | States |
+| --- | --- |
+| House ventilation | `keep_windows_closed`, `shock_ventilation_recommended`, `cross_ventilation_recommended`, `ventilation_active`, `cross_ventilation_active`, `ventilation_active_limited`, `ventilation_continue`, `close_windows`, `unknown` |
+| Day briefing | `hot`, `summer`, `mild`, `cool` |
+| Room recommendation | `excellent`, `good`, `medium`, `warning`, `bad`, `critical`, `unknown` |
+
+The German display text is available in the `title` (house ventilation), `day_type` (day briefing) and `level` (recommendation) attributes.
+
+## Development
+
+```bash
+pip install -r requirements_test.txt
+pytest tests
+```
+
+`tests/integration` runs the integration in a real Home Assistant via `pytest-homeassistant-custom-component`.

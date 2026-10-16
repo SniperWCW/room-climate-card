@@ -3,37 +3,184 @@
   "config": {
     "step": {
       "user": {
-        "title": "Room Climate einrichten",
-        "description": "Globale Entitäten und Push-Einstellungen für Room Climate."
+        "title": "Set up Room Climate",
+        "description": "Global entities and push settings for Room Climate.",
+        "data": {
+          "name": "Name",
+          "outside_absolute_humidity": "Outdoor absolute humidity",
+          "outside_weather": "Outdoor weather entity",
+          "sun_entity": "Sun entity",
+          "notification_enabled": "Enable push notifications",
+          "notify_service": "Notify service",
+          "notification_cooldown": "Push cooldown in minutes",
+          "wall_quality": "Exterior wall insulation"
+        },
+        "data_description": {
+          "outside_absolute_humidity": "Optional. Without a sensor, it is calculated from the weather entity's temperature and humidity.",
+          "wall_quality": "How cold exterior walls get in winter. Used to estimate the mould risk."
+        }
       }
     },
-    "error": {},
     "abort": {
-      "single_instance_allowed": "Room Climate kann nur einmal eingerichtet werden."
+      "single_instance_allowed": "Room Climate can only be set up once."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Room Climate verwalten"
-      },
-      "global": {
-        "title": "Globale Einstellungen"
+        "title": "Manage Room Climate",
+        "menu_options": {
+          "global": "Global settings",
+          "import_detected_rooms": "Select rooms from Home Assistant",
+          "add_room_manual": "Add room manually",
+          "edit_room_select": "Edit room",
+          "remove_room": "Remove room"
+        }
       },
       "import_detected_rooms": {
-        "title": "Räume aus Home Assistant auswählen"
+        "title": "Select rooms from Home Assistant",
+        "data": {
+          "selected_rooms": "Rooms to import"
+        }
+      },
+      "global": {
+        "title": "Global settings",
+        "data": {
+          "name": "Name",
+          "outside_absolute_humidity": "Outdoor absolute humidity",
+          "outside_weather": "Outdoor weather entity",
+          "sun_entity": "Sun entity",
+          "notification_enabled": "Enable push notifications",
+          "notify_service": "Notify service",
+          "notification_cooldown": "Push cooldown in minutes",
+          "wall_quality": "Exterior wall insulation"
+        },
+        "data_description": {
+          "outside_absolute_humidity": "Optional. Without a sensor, it is calculated from the weather entity's temperature and humidity.",
+          "wall_quality": "How cold exterior walls get in winter. Used to estimate the mould risk."
+        }
       },
       "add_room_manual": {
-        "title": "Raum manuell hinzufügen"
+        "title": "Add room manually",
+        "data": {
+          "name": "Room name",
+          "room_type": "Room type",
+          "window_orientation": "Window orientation",
+          "temperature": "Temperature sensor",
+          "humidity": "Humidity sensor",
+          "inside_absolute_humidity": "Indoor absolute humidity",
+          "window": "Window sensor",
+          "cover": "Roller shade / cover",
+          "humidex_value": "Humidex value",
+          "scharlau": "Summer Scharlau perception",
+          "humidex": "Humidex perception",
+          "simmer": "Summer Simmer perception",
+          "dewpoint": "Dew point perception",
+          "notifications_enabled": "Enable push for this room",
+          "climate": "Thermostat / heating"
+        },
+        "data_description": {
+          "inside_absolute_humidity": "Optional. Without a sensor, it is calculated from temperature and humidity.",
+          "climate": "Optional. Enables hints to turn down the heating and detects the heating season."
+        }
       },
       "edit_room_select": {
-        "title": "Raum auswählen"
+        "title": "Select room",
+        "data": {
+          "id": "Room"
+        }
       },
       "edit_room": {
-        "title": "Raum bearbeiten"
+        "title": "Edit room",
+        "data": {
+          "name": "Room name",
+          "room_type": "Room type",
+          "window_orientation": "Window orientation",
+          "temperature": "Temperature sensor",
+          "humidity": "Humidity sensor",
+          "inside_absolute_humidity": "Indoor absolute humidity",
+          "window": "Window sensor",
+          "cover": "Roller shade / cover",
+          "humidex_value": "Humidex value",
+          "scharlau": "Summer Scharlau perception",
+          "humidex": "Humidex perception",
+          "simmer": "Summer Simmer perception",
+          "dewpoint": "Dew point perception",
+          "notifications_enabled": "Enable push for this room",
+          "climate": "Thermostat / heating"
+        },
+        "data_description": {
+          "inside_absolute_humidity": "Optional. Without a sensor, it is calculated from temperature and humidity.",
+          "climate": "Optional. Enables hints to turn down the heating and detects the heating season."
+        }
       },
       "remove_room": {
-        "title": "Raum entfernen"
+        "title": "Remove room",
+        "data": {
+          "id": "Room"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "overview": {
+        "name": "Day briefing",
+        "state": {
+          "hot": "Hot day",
+          "summer": "Summer day",
+          "mild": "Mild day",
+          "cool": "Cool day"
+        }
+      },
+      "house_ventilation": {
+        "name": "House ventilation",
+        "state": {
+          "unknown": "Cannot be evaluated",
+          "keep_windows_closed": "Do not ventilate",
+          "shock_ventilation_recommended": "Burst ventilation recommended",
+          "cross_ventilation_recommended": "Cross ventilation recommended",
+          "ventilation_active": "Ventilating",
+          "cross_ventilation_active": "Cross ventilating",
+          "ventilation_active_limited": "Ventilating (no room values)",
+          "ventilation_continue": "Keep ventilating",
+          "close_windows": "Close windows"
+        }
+      },
+      "next_ventilation_window": {
+        "name": "Next ventilation window"
+      },
+      "score": {
+        "name": "Score"
+      },
+      "recommendation": {
+        "name": "Recommendation",
+        "state": {
+          "excellent": "Ideal",
+          "good": "Comfortable",
+          "medium": "Okay",
+          "warning": "Straining",
+          "bad": "Poor",
+          "critical": "Critical",
+          "unknown": "Unknown"
+        }
+      }
+    },
+    "binary_sensor": {
+      "ventilate_now": {
+        "name": "Ventilate now"
+      },
+      "close_window": {
+        "name": "Close window"
+      },
+      "close_cover": {
+        "name": "Close cover"
+      },
+      "mold_risk": {
+        "name": "Mould risk"
+      },
+      "reduce_heating": {
+        "name": "Reduce heating"
       }
     }
   }

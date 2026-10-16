@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
 
 from .const import CARD_FILENAME, CARD_URL_PATH, CONF_ROOMS, DOMAIN, PLATFORMS
-from .coordinator import IntegrationData, RoomClimateCoordinator
+from .coordinator import RoomClimateConfigEntry, RoomClimateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 # Configured through the UI only; required by hassfest because async_setup exists.
@@ -21,6 +21,8 @@ ROOM_ENTITY_SUFFIXES = (
     "_ventilate_now",
     "_close_window",
     "_close_cover",
+    "_mold_risk",
+    "_reduce_heating",
 )
 
 
@@ -81,10 +83,11 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: RoomClimateConfigEntry) -> bool:
     coordinator = RoomClimateCoordinator(hass, entry)
+    entry.runtime_data = coordinator
+    # hass.data only keeps the shared card registration state.
     domain_data = hass.data.setdefault(DOMAIN, {})
-    domain_data[entry.entry_id] = IntegrationData(coordinator=coordinator)
 
     if not domain_data.get("card_registered"):
         card_path = Path(__file__).parent / "www" / CARD_FILENAME
@@ -109,15 +112,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: RoomClimateConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
-        domain_data = hass.data[DOMAIN]
-        domain_data.pop(entry.entry_id, None)
-        remaining_entries = [
-            key for key in domain_data if key not in {"card_registered", "card_resource_url"}
-        ]
-        if not remaining_entries and domain_data.get("card_registered"):
+        domain_data = hass.data.get(DOMAIN, {})
+        # single_config_entry: unloading the entry removes the card resource.
+        if domain_data.get("card_registered"):
             remove_extra_js_url(hass, domain_data.get("card_resource_url", CARD_URL_PATH))
             domain_data["card_registered"] = False
             domain_data.pop("card_resource_url", None)

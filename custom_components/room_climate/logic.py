@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import math
 from typing import Any
 
 from homeassistant.util import dt as dt_util
@@ -22,9 +23,12 @@ from .const import (
     CONF_TEMPERATURE,
     CONF_WINDOW,
     CONF_WINDOW_ORIENTATION,
+    DEFAULT_WALL_QUALITY,
     NOTIFICATION_CLOSE_COVER,
     NOTIFICATION_CLOSE_WINDOW,
+    NOTIFICATION_MOLD_RISK,
     NOTIFICATION_VENTILATE,
+    WALL_QUALITY_FACTORS,
 )
 from .house_ventilation import (
     ORIENTATION_AZIMUTH,
@@ -66,6 +70,11 @@ MIN_COOLING_START = 24.0
 # Below this outside temperature it is heating season: cooling a room by
 # ventilating only wastes heating energy, so no cooling advice is given.
 MIN_OUTSIDE_TEMP_FOR_COOLING = 12.0
+
+
+def _de(value: float) -> str:
+    """Format a number with one decimal and a German decimal comma."""
+    return f"{value:.1f}".replace(".", ",")
 
 
 def slugify(value: str) -> str:
@@ -344,7 +353,11 @@ def get_simmer_text(value: str | None) -> str:
     return mapping.get(value or "", "unbekannt")
 
 
-def get_climate_causes(metrics: dict[str, Any], profile: dict[str, float]) -> list[str]:
+def get_climate_causes(
+    metrics: dict[str, Any],
+    profile: dict[str, float],
+    mold: dict[str, Any] | None = None,
+) -> list[str]:
     """Name what is actually wrong with the room climate, cold and dry included."""
     temp = metrics.get(CONF_TEMPERATURE)
     rel_humidity = metrics.get(CONF_HUMIDITY)
@@ -354,15 +367,15 @@ def get_climate_causes(metrics: dict[str, Any], profile: dict[str, float]) -> li
 
     if temp is not None:
         if temp >= 29:
-            causes.append(f"sehr warm ({temp:.1f} °C)")
+            causes.append(f"sehr warm ({_de(temp)} °C)")
         elif temp >= 26:
-            causes.append(f"warm ({temp:.1f} °C)")
+            causes.append(f"warm ({_de(temp)} °C)")
         elif temp > profile["temp_max"] + 1:
-            causes.append(f"etwas warm ({temp:.1f} °C)")
+            causes.append(f"etwas warm ({_de(temp)} °C)")
         elif temp < profile["temp_min"]:
-            causes.append(f"zu kühl ({temp:.1f} °C)")
+            causes.append(f"zu kühl ({_de(temp)} °C)")
         elif temp < profile["temp_min"] + 1:
-            causes.append(f"eher kühl ({temp:.1f} °C)")
+            causes.append(f"eher kühl ({_de(temp)} °C)")
 
     if rel_humidity is not None:
         if rel_humidity < get_dry_threshold(profile):
@@ -376,10 +389,20 @@ def get_climate_causes(metrics: dict[str, Any], profile: dict[str, float]) -> li
         causes.append(f"Luft wirkt {get_dew_text(dewpoint)}")
     if humidex_value is not None and humidex_value >= 30:
         causes.append(f"Humidex {humidex_value:.0f}")
+    if mold and mold.get("level") == "high":
+        causes.append("Schimmelrisiko an kalten Wänden")
+    elif mold and mold.get("level") == "elevated":
+        causes.append("erhöhte Feuchte an kalten Wänden")
     return causes
 
 
-def get_description(room: dict[str, Any], score: int, metrics: dict[str, Any], profile: dict[str, float]) -> str:
+def get_description(
+    room: dict[str, Any],
+    score: int,
+    metrics: dict[str, Any],
+    profile: dict[str, float],
+    mold: dict[str, Any] | None = None,
+) -> str:
     name = room[CONF_ROOM_NAME]
     if score >= 90:
         phrase = "nahezu ideales Raumklima"
@@ -394,7 +417,7 @@ def get_description(room: dict[str, Any], score: int, metrics: dict[str, Any], p
     else:
         phrase = "kritisches Raumklima"
 
-    causes = get_climate_causes(metrics, profile)
+    causes = get_climate_causes(metrics, profile, mold)
     if not causes or score >= 90:
         return f"{name}: {phrase}."
     return f"{name}: {phrase}. Auffällig: {', '.join(causes)}."
@@ -408,7 +431,11 @@ def _comfort_band_score(value: float, low: float, high: float, penalty_per_unit:
     return 100.0
 
 
-def calculate_score(room: dict[str, Any], metrics: dict[str, Any]) -> int:
+def calculate_score(
+    room: dict[str, Any],
+    metrics: dict[str, Any],
+    mold_risk: str | None = None,
+) -> int:
     """Score the room climate from 0 to 100.
 
     Thermal Comfort categories (Scharlau, Humidex, dew point, Simmer) are used
@@ -466,11 +493,14 @@ def calculate_score(room: dict[str, Any], metrics: dict[str, Any]) -> int:
             score -= 10
         elif uses_comfort_sensors:
             # The Thermal Comfort categories are summer indices and do not see
-            # cold rooms; the fallback base score already contains this.
+            # cold rooms or rooms a little above the profile (e.g. a 22 °C
+            # bedroom); the fallback base score already contains both.
             if temp < profile["temp_min"] - 1:
                 score -= 20
             elif temp < profile["temp_min"]:
                 score -= 10
+            elif temp > profile["temp_max"]:
+                score -= round(min(20.0, (temp - profile["temp_max"]) * 5))
 
     if humidex_value is not None:
         if humidex_value >= 40:
@@ -490,7 +520,71 @@ def calculate_score(room: dict[str, Any], metrics: dict[str, Any]) -> int:
         elif rel_humidity > profile["humidity_max"] + 5:
             score -= 10
 
+    if mold_risk == "high":
+        score -= 15
+    elif mold_risk == "elevated":
+        score -= 5
+
     return max(0, min(100, score))
+
+
+def saturation_vapour_pressure(temperature: float) -> float:
+    """Saturation vapour pressure over water in hPa (Magnus formula)."""
+    return 6.112 * math.exp((17.62 * temperature) / (243.12 + temperature))
+
+
+def get_mold_risk(
+    inside_temp: float | None,
+    inside_rel: float | None,
+    outside_temp: float | None,
+    wall_factor: float,
+) -> dict[str, Any]:
+    """Estimate the relative humidity at the coldest wall surface.
+
+    The surface temperature follows DIN 4108-2: outside + f_Rsi * (inside -
+    outside). Mould can grow from about 80 % relative humidity at the surface,
+    condensation starts at 100 %.
+    """
+    if inside_temp is None or inside_rel is None:
+        return {"level": None, "surface_temperature": None, "surface_humidity": None}
+    surface_temp = inside_temp
+    if outside_temp is not None and outside_temp < inside_temp:
+        surface_temp = outside_temp + wall_factor * (inside_temp - outside_temp)
+    surface_humidity = min(
+        100.0,
+        inside_rel * saturation_vapour_pressure(inside_temp) / saturation_vapour_pressure(surface_temp),
+    )
+    if surface_humidity >= 80:
+        level = "high"
+    elif surface_humidity >= 70:
+        level = "elevated"
+    else:
+        level = "low"
+    return {
+        "level": level,
+        "surface_temperature": round(surface_temp, 1),
+        "surface_humidity": round(surface_humidity, 1),
+    }
+
+
+HEATING_ACTIONS = {"heating", "preheating"}
+HEATING_MODES = {"heat", "heat_cool", "auto"}
+
+
+def get_heating_state(climate: dict[str, Any] | None) -> dict[str, Any]:
+    """Interpret a climate entity: is heating enabled, and is it heating now?"""
+    if not climate or climate.get("state") in (None, "unknown", "unavailable"):
+        return {"available": False, "enabled": False, "active": False, "target": None}
+    mode = climate.get("state")
+    action = climate.get("hvac_action")
+    target = as_float(climate.get("target_temperature"))
+    current = as_float(climate.get("current_temperature"))
+    enabled = mode in HEATING_MODES and (target is None or target > 12)
+    if action is not None:
+        active = action in HEATING_ACTIONS
+    else:
+        active = bool(enabled and target is not None and current is not None and target > current + 0.3)
+    return {"available": True, "enabled": enabled, "active": active, "target": target, "mode": mode, "action": action}
 
 
 @dataclass(slots=True)
@@ -514,6 +608,16 @@ class RoomResult:
     solar_label: str
     attributes: dict[str, Any]
     notifications_enabled: bool
+    mold_risk: bool = False
+    mold_risk_reason: str | None = None
+    reduce_heating: bool = False
+    reduce_heating_reason: str | None = None
+
+    def set_mold_pending(self) -> None:
+        """Hold back a fresh mould risk (e.g. right after a shower)."""
+        self.mold_risk = False
+        self.attributes["mold_risk_active"] = False
+        self.attributes["notification_flags"][NOTIFICATION_MOLD_RISK] = False
 
     def apply_session_finish(self, reason: str) -> None:
         """Force a close-window advice, e.g. after the maximum ventilation time."""
@@ -533,6 +637,7 @@ def evaluate_room(
     outside_weather: dict[str, Any],
     sun: dict[str, Any],
     forecast: list[dict[str, Any]],
+    wall_quality: str = DEFAULT_WALL_QUALITY,
 ) -> RoomResult:
     room_type = room.get(CONF_ROOM_TYPE, "default")
     profile = get_room_profile(room_type)
@@ -562,6 +667,15 @@ def evaluate_room(
         )
     )
 
+    mold = get_mold_risk(
+        inside_temp if inputs_available else None,
+        inside_rel if inputs_available else None,
+        outside_temp,
+        WALL_QUALITY_FACTORS.get(wall_quality, WALL_QUALITY_FACTORS[DEFAULT_WALL_QUALITY]),
+    )
+    mold_high = mold["level"] == "high"
+    heating = get_heating_state(metrics.get("climate"))
+
     # Thresholds, relaxed while the window is already open (hysteresis).
     humidity_relax = OPEN_HUMIDITY_RELAX if window_open else 0.0
     diff_factor = OPEN_DIFF_FACTOR if window_open else 1.0
@@ -584,7 +698,11 @@ def evaluate_room(
         cooling_start - OPEN_TEMPERATURE_RELAX if cooling_start is not None and window_open else cooling_start
     )
     room_warm = cooling_start is not None and inside_temp is not None and inside_temp >= cooling_start
-    heating_season = outside_temp is not None and outside_temp < MIN_OUTSIDE_TEMP_FOR_COOLING
+    # Heating season: cold outside, or the room's thermostat is actually heating.
+    heating_season = bool(
+        (outside_temp is not None and outside_temp < MIN_OUTSIDE_TEMP_FOR_COOLING)
+        or heating["active"]
+    )
     can_cool = bool(
         effective_cooling_start is not None
         and inside_temp is not None
@@ -605,12 +723,14 @@ def evaluate_room(
 
     # Benefit of the outside air for this room, independent of whether a
     # window contact is configured. Stale or missing room values never count.
+    # A mould risk at cold walls also makes drying useful below the profile's
+    # humidity maximum.
     dehumidify_climate = bool(
         inputs_available
         and diff is not None
         and (
             (humidity_very_high and diff >= vent_strong)
-            or (humidity_high and diff >= vent_moderate)
+            or ((humidity_high or mold_high) and diff >= vent_moderate)
         )
     )
     cooling_climate = bool(inputs_available and can_cool and not (too_humid_outside and not strong_cooling))
@@ -650,6 +770,9 @@ def evaluate_room(
             elif humidity_high and diff is not None and diff >= vent_moderate:
                 dehumidify_text = f"Leichtes Entfeuchten sinnvoll, ca. {duration} Min."
                 dehumidify_level = "short"
+            elif mold_high and diff is not None and diff >= vent_moderate:
+                dehumidify_text = f"Entfeuchten wegen Schimmelrisiko an kalten Wänden sinnvoll, ca. {duration} Min."
+                dehumidify_level = "short"
             elif humidity_high and diff is not None and diff <= 0.3:
                 dehumidify_text = "Nicht sinnvoll – außen kaum trockener"
                 dehumidify_level = "avoid"
@@ -680,8 +803,12 @@ def evaluate_room(
             cooling_level = "neutral"
         elif heating_season:
             cooling_text = (
-                f"Fenster geschlossen halten. Bei {outside_temp:.0f} °C außen würde Lüften zum Kühlen "
-                "nur Heizenergie verschwenden – besser die Heizung reduzieren."
+                "Fenster geschlossen halten. Die Heizung läuft gerade – Solltemperatur senken statt zu lüften."
+                if heating["active"]
+                else (
+                    f"Fenster geschlossen halten. Bei {outside_temp:.0f} °C außen würde Lüften zum Kühlen "
+                    "nur Heizenergie verschwenden – besser die Heizung reduzieren."
+                )
             )
             cooling_level = "neutral"
         elif not can_cool:
@@ -711,12 +838,12 @@ def evaluate_room(
         if cooling_window["time_text"]:
             next_window = (
                 f"Nächstes Lüftungsfenster: frühestens ab {cooling_window['time_text']} Uhr, wenn die Außentemperatur unter "
-                f"{cooling_window['threshold']:.1f} °C fällt."
+                f"{_de(cooling_window['threshold'])} °C fällt."
             )
         else:
-            next_window = f"Nächstes Lüftungsfenster: sobald die Außentemperatur unter {cooling_window['threshold']:.1f} °C fällt."
+            next_window = f"Nächstes Lüftungsfenster: sobald die Außentemperatur unter {_de(cooling_window['threshold'])} °C fällt."
 
-    score = calculate_score(room, metrics) if inputs_available else None
+    score = calculate_score(room, metrics, mold["level"]) if inputs_available else None
     humidex_value = metrics.get(CONF_HUMIDEX_VALUE)
     level = (
         get_display_level(score)
@@ -724,7 +851,7 @@ def evaluate_room(
         else {"label": "Unbekannt", "cls": "unknown", "icon": "❔"}
     )
     description = (
-        get_description(room, score, metrics, profile)
+        get_description(room, score, metrics, profile, mold)
         if score is not None
         else "Für einen Raumklima-Score fehlen aktuelle Temperatur- oder Feuchtewerte."
     )
@@ -743,6 +870,36 @@ def evaluate_room(
         if close_window
         else None
     )
+    mold_reason = None
+    if mold_high:
+        mold_reason = (
+            f"Schimmelrisiko: An kalten Außenwänden (ca. {_de(mold['surface_temperature'])} °C) erreicht die Luft "
+            f"etwa {mold['surface_humidity']:.0f} % Feuchte."
+        )
+        if dehumidify_climate and window_open:
+            mold_reason += " Das offene Fenster senkt das Risiko."
+        elif dehumidify_climate:
+            mold_reason += " Stoßlüften senkt das Risiko."
+        elif diff is not None and diff <= 0.3:
+            mold_reason += " Die Außenluft ist zu feucht – Feuchtequellen reduzieren und den Raum nicht auskühlen lassen."
+        else:
+            mold_reason += " Regelmäßig stoßlüften und den Raum gleichmäßig beheizen."
+
+    reduce_heating_reason = None
+    if inputs_available and heating["enabled"] and window_open:
+        reduce_heating_reason = "Fenster offen – Thermostat herunterregeln, solange gelüftet wird."
+    elif (
+        inputs_available
+        and heating["active"]
+        and inside_temp is not None
+        and inside_temp > profile["temp_max"] + 1
+    ):
+        reduce_heating_reason = (
+            f"Raum ist mit {_de(inside_temp)} °C wärmer als nötig (bis {profile['temp_max']:.0f} °C), "
+            "die Heizung heizt aber noch – Solltemperatur senken."
+        )
+    reduce_heating = reduce_heating_reason is not None
+
     cover_temp_threshold = max(profile["temp_max"] + 4, 24.5)
     cover_available = bool(room.get(CONF_COVER))
     cover_can_be_closed = not cover_available or cover_state not in {"closed", "closing"}
@@ -754,7 +911,7 @@ def evaluate_room(
         and inside_temp >= cover_temp_threshold
     )
     close_cover_reason = (
-        f"Rollladen schließen. Direkter Sonneneintrag heizt den Raum bei {inside_temp:.1f} °C zusätzlich auf."
+        f"Rollladen schließen. Direkter Sonneneintrag heizt den Raum bei {_de(inside_temp)} °C zusätzlich auf."
         if close_cover and inside_temp is not None
         else None
     )
@@ -796,10 +953,27 @@ def evaluate_room(
         "wind_effect": wind_effect_text,
         "cover_state": cover_state,
         "cover_entity": room.get(CONF_COVER),
+        "comfort_temperature_min": profile["temp_min"],
+        "comfort_temperature_max": profile["temp_max"],
+        "comfort_humidity_min": profile["humidity_min"],
+        "comfort_humidity_max": profile["humidity_max"],
+        "mold_risk": mold["level"],
+        # Set to False by the coordinator until the risk has lasted a while.
+        "mold_risk_active": mold_high,
+        "mold_risk_reason": mold_reason,
+        "wall_surface_temperature": mold["surface_temperature"],
+        "wall_surface_humidity": mold["surface_humidity"],
+        "climate_entity": metrics.get("climate_entity"),
+        "heating_enabled": heating["enabled"],
+        "heating_active": heating["active"],
+        "heating_target_temperature": heating["target"],
+        "reduce_heating": reduce_heating,
+        "reduce_heating_reason": reduce_heating_reason,
         "notification_flags": {
             NOTIFICATION_VENTILATE: ventilate_now,
             NOTIFICATION_CLOSE_WINDOW: close_window,
             NOTIFICATION_CLOSE_COVER: close_cover,
+            NOTIFICATION_MOLD_RISK: mold_high,
         },
     }
 
@@ -823,4 +997,8 @@ def evaluate_room(
         solar_label=solar_exposure["label"],
         attributes=attributes,
         notifications_enabled=bool(room.get(CONF_ROOM_NOTIFICATIONS, True)),
+        mold_risk=mold_high,
+        mold_risk_reason=mold_reason,
+        reduce_heating=reduce_heating,
+        reduce_heating_reason=reduce_heating_reason,
     )
