@@ -15,12 +15,22 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install pytest
-      - run: python -m pytest -q tests
+      - run: python -m pytest -q tests --ignore=tests/integration
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
       - name: Check card syntax
         run: node --check custom_components/room_climate/www/room-climate-card.js
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - run: pip install -r requirements_test.txt
+      - run: python -m pytest -q tests
 
   hassfest:
     runs-on: ubuntu-latest

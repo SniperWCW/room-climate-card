@@ -12,10 +12,12 @@
           "sun_entity": "Sonnen-Entität",
           "notification_enabled": "Push-Benachrichtigungen aktivieren",
           "notify_service": "Notify-Service",
-          "notification_cooldown": "Push-Abstand in Minuten"
+          "notification_cooldown": "Push-Abstand in Minuten",
+          "wall_quality": "Dämmstandard der Außenwände"
         },
         "data_description": {
-          "outside_absolute_humidity": "Optional. Ohne Sensor wird die absolute Außenfeuchte aus Temperatur und Luftfeuchte der Wetter-Entität berechnet."
+          "outside_absolute_humidity": "Optional. Ohne Sensor wird die absolute Außenfeuchte aus Temperatur und Luftfeuchte der Wetter-Entität berechnet.",
+          "wall_quality": "Bestimmt, wie kalt Außenwände im Winter werden. Wird für die Schimmelrisiko-Abschätzung genutzt."
         }
       }
     },
@@ -50,10 +52,12 @@
           "sun_entity": "Sonnen-Entität",
           "notification_enabled": "Push-Benachrichtigungen aktivieren",
           "notify_service": "Notify-Service",
-          "notification_cooldown": "Push-Abstand in Minuten"
+          "notification_cooldown": "Push-Abstand in Minuten",
+          "wall_quality": "Dämmstandard der Außenwände"
         },
         "data_description": {
-          "outside_absolute_humidity": "Optional. Ohne Sensor wird die absolute Außenfeuchte aus Temperatur und Luftfeuchte der Wetter-Entität berechnet."
+          "outside_absolute_humidity": "Optional. Ohne Sensor wird die absolute Außenfeuchte aus Temperatur und Luftfeuchte der Wetter-Entität berechnet.",
+          "wall_quality": "Bestimmt, wie kalt Außenwände im Winter werden. Wird für die Schimmelrisiko-Abschätzung genutzt."
         }
       },
       "add_room_manual": {
@@ -72,10 +76,12 @@
           "humidex": "Humidex gefühlt",
           "simmer": "Sommer Simmer gefühlt",
           "dewpoint": "Taupunkt gefühlt",
-          "notifications_enabled": "Push für diesen Raum aktivieren"
+          "notifications_enabled": "Push für diesen Raum aktivieren",
+          "climate": "Thermostat / Heizung"
         },
         "data_description": {
-          "inside_absolute_humidity": "Optional. Ohne Sensor wird der Wert aus Temperatur und Luftfeuchtigkeit berechnet."
+          "inside_absolute_humidity": "Optional. Ohne Sensor wird der Wert aus Temperatur und Luftfeuchtigkeit berechnet.",
+          "climate": "Optional. Ermöglicht Hinweise zum Herunterregeln der Heizung und erkennt die Heizsaison."
         }
       },
       "edit_room_select": {
@@ -100,10 +106,12 @@
           "humidex": "Humidex gefühlt",
           "simmer": "Sommer Simmer gefühlt",
           "dewpoint": "Taupunkt gefühlt",
-          "notifications_enabled": "Push für diesen Raum aktivieren"
+          "notifications_enabled": "Push für diesen Raum aktivieren",
+          "climate": "Thermostat / Heizung"
         },
         "data_description": {
-          "inside_absolute_humidity": "Optional. Ohne Sensor wird der Wert aus Temperatur und Luftfeuchtigkeit berechnet."
+          "inside_absolute_humidity": "Optional. Ohne Sensor wird der Wert aus Temperatur und Luftfeuchtigkeit berechnet.",
+          "climate": "Optional. Ermöglicht Hinweise zum Herunterregeln der Heizung und erkennt die Heizsaison."
         }
       },
       "remove_room": {
@@ -111,6 +119,68 @@
         "data": {
           "id": "Raum"
         }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "overview": {
+        "name": "Tageslage",
+        "state": {
+          "hot": "Hitzetag",
+          "summer": "Sommertag",
+          "mild": "Milder Tag",
+          "cool": "Kühler Tag"
+        }
+      },
+      "house_ventilation": {
+        "name": "Hauslüftung",
+        "state": {
+          "unknown": "Nicht bewertbar",
+          "keep_windows_closed": "Aktuell nicht lüften",
+          "shock_ventilation_recommended": "Stoßlüften empfohlen",
+          "cross_ventilation_recommended": "Querlüften empfohlen",
+          "ventilation_active": "Lüften aktiv",
+          "cross_ventilation_active": "Querlüften aktiv",
+          "ventilation_active_limited": "Lüftung läuft (ohne Raumwerte)",
+          "ventilation_continue": "Weiterlüften",
+          "close_windows": "Fenster schließen"
+        }
+      },
+      "next_ventilation_window": {
+        "name": "Nächstes Lüftungsfenster"
+      },
+      "score": {
+        "name": "Score"
+      },
+      "recommendation": {
+        "name": "Empfehlung",
+        "state": {
+          "excellent": "Ideal",
+          "good": "Angenehm",
+          "medium": "Okay",
+          "warning": "Belastend",
+          "bad": "Schlecht",
+          "critical": "Kritisch",
+          "unknown": "Unbekannt"
+        }
+      }
+    },
+    "binary_sensor": {
+      "ventilate_now": {
+        "name": "Lüften jetzt"
+      },
+      "close_window": {
+        "name": "Fenster schließen"
+      },
+      "close_cover": {
+        "name": "Rollladen schließen"
+      },
+      "mold_risk": {
+        "name": "Schimmelrisiko"
+      },
+      "reduce_heating": {
+        "name": "Heizung herunterregeln"
       }
     }
   }

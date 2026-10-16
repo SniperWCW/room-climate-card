@@ -8,11 +8,17 @@ import unicodedata
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.core import callback
 from homeassistant.helpers import selector
 from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
 
 from .const import (
+    CONF_CLIMATE,
     CONF_COVER,
+    CONF_WALL_QUALITY,
+    DEFAULT_WALL_QUALITY,
+    OPTIONAL_ROOM_ENTITY_KEYS,
+    WALL_QUALITY_FACTORS,
     CONF_DEWPOINT,
     CONF_HUMIDEX,
     CONF_HUMIDEX_VALUE,
@@ -215,6 +221,7 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
                 CONF_INSIDE_ABSOLUTE_HUMIDITY: "",
                 CONF_WINDOW: "",
                 CONF_COVER: "",
+                CONF_CLIMATE: "",
                 CONF_HUMIDEX_VALUE: "",
                 CONF_SCHARLAU: "",
                 CONF_HUMIDEX: "",
@@ -256,6 +263,7 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
             or find_entity_for_area(area.id, ("rollerladen",), ("cover",))
             or find_entity_for_area(area.id, ("shade",), ("cover",))
         )
+        room[CONF_CLIMATE] = room[CONF_CLIMATE] or find_entity_for_area(area.id, (), ("climate",))
         room[CONF_HUMIDEX_VALUE] = room[CONF_HUMIDEX_VALUE] or find_entity_for_area(area.id, ("thermal_comfort", "humidex"))
         room[CONF_SCHARLAU] = room[CONF_SCHARLAU] or find_entity_for_area(area.id, ("thermal_comfort", "sommer_scharlau_gefuhlt"))
         room[CONF_HUMIDEX] = room[CONF_HUMIDEX] or find_entity_for_area(area.id, ("thermal_comfort", "humidex_gefuhlt"))
@@ -335,6 +343,13 @@ def _notify_service_options(hass) -> list[selector.SelectOptionDict]:
     return options
 
 
+WALL_QUALITY_LABELS = {
+    "old": "Altbau / ungedämmt",
+    "standard": "Standard",
+    "good": "Gut gedämmt / Neubau",
+}
+
+
 def _global_schema(hass, defaults: dict[str, Any] | None = None) -> vol.Schema:
     defaults = defaults or {}
     outside_abs_field = _optional_entity_field(CONF_OUTSIDE_ABSOLUTE_HUMIDITY, defaults, "sensor")
@@ -346,6 +361,15 @@ def _global_schema(hass, defaults: dict[str, Any] | None = None) -> vol.Schema:
             outside_abs_field[0]: outside_abs_field[1],
             outside_weather_field[0]: outside_weather_field[1],
             sun_field[0]: sun_field[1],
+            vol.Required(CONF_WALL_QUALITY, default=defaults.get(CONF_WALL_QUALITY, DEFAULT_WALL_QUALITY)): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        selector.SelectOptionDict(value=value, label=WALL_QUALITY_LABELS[value])
+                        for value in WALL_QUALITY_FACTORS
+                    ],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
             vol.Required(CONF_NOTIFICATION_ENABLED, default=defaults.get(CONF_NOTIFICATION_ENABLED, DEFAULT_NOTIFICATION_ENABLED)): selector.BooleanSelector(),
             vol.Optional(CONF_NOTIFY_SERVICE, default=defaults.get(CONF_NOTIFY_SERVICE, "")): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=_notify_service_options(hass), mode=selector.SelectSelectorMode.DROPDOWN)
@@ -381,6 +405,7 @@ def _room_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     inside_abs_field = _optional_entity_field(CONF_INSIDE_ABSOLUTE_HUMIDITY, defaults, "sensor")
     window_field = _optional_entity_field(CONF_WINDOW, defaults, "binary_sensor")
     cover_field = _optional_entity_field(CONF_COVER, defaults, "cover")
+    climate_field = _optional_entity_field(CONF_CLIMATE, defaults, "climate")
     humidex_value_field = _optional_entity_field(CONF_HUMIDEX_VALUE, defaults, "sensor")
     scharlau_field = _optional_entity_field(CONF_SCHARLAU, defaults, "sensor")
     humidex_field = _optional_entity_field(CONF_HUMIDEX, defaults, "sensor")
@@ -404,6 +429,7 @@ def _room_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             inside_abs_field[0]: inside_abs_field[1],
             window_field[0]: window_field[1],
             cover_field[0]: cover_field[1],
+            climate_field[0]: climate_field[1],
             humidex_value_field[0]: humidex_value_field[1],
             scharlau_field[0]: scharlau_field[1],
             humidex_field[0]: humidex_field[1],
@@ -418,8 +444,9 @@ class RoomClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     @staticmethod
-    def async_get_options_flow(config_entry):
-        return RoomClimateOptionsFlow(config_entry)
+    @callback
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> RoomClimateOptionsFlow:
+        return RoomClimateOptionsFlow()
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         if self._async_current_entries():
@@ -434,6 +461,7 @@ class RoomClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_NOTIFICATION_ENABLED: user_input.get(CONF_NOTIFICATION_ENABLED, True),
                 CONF_NOTIFY_SERVICE: user_input.get(CONF_NOTIFY_SERVICE, ""),
                 CONF_NOTIFICATION_COOLDOWN: int(user_input.get(CONF_NOTIFICATION_COOLDOWN, DEFAULT_NOTIFICATION_COOLDOWN)),
+                CONF_WALL_QUALITY: user_input.get(CONF_WALL_QUALITY, DEFAULT_WALL_QUALITY),
                 CONF_ROOMS: [],
             }
             await self.async_set_unique_id(DOMAIN)
@@ -451,15 +479,23 @@ class RoomClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(step_id="user", data_schema=_global_schema(self.hass, defaults))
 
 
+def _normalize_room(room: dict[str, Any]) -> dict[str, Any]:
+    """Store cleared optional entities as "" so they stay cleared.
+
+    A missing key would otherwise enable thermostat auto-detection again.
+    """
+    for key in OPTIONAL_ROOM_ENTITY_KEYS:
+        room.setdefault(key, "")
+    return room
+
+
 class RoomClimateOptionsFlow(config_entries.OptionsFlow):
-    def __init__(self, entry) -> None:
-        self.entry = entry
+    def __init__(self) -> None:
         self._editing_room_id: str | None = None
-        self._remove_room_id: str | None = None
 
     @property
     def config(self) -> dict[str, Any]:
-        return {**self.entry.data, **self.entry.options}
+        return {**self.config_entry.data, **self.config_entry.options}
 
     @property
     def rooms(self) -> list[dict[str, Any]]:
@@ -490,6 +526,7 @@ class RoomClimateOptionsFlow(config_entries.OptionsFlow):
                     CONF_NOTIFICATION_ENABLED: user_input.get(CONF_NOTIFICATION_ENABLED, True),
                     CONF_NOTIFY_SERVICE: user_input.get(CONF_NOTIFY_SERVICE, ""),
                     CONF_NOTIFICATION_COOLDOWN: int(user_input.get(CONF_NOTIFICATION_COOLDOWN, DEFAULT_NOTIFICATION_COOLDOWN)),
+                    CONF_WALL_QUALITY: user_input.get(CONF_WALL_QUALITY, DEFAULT_WALL_QUALITY),
                 }
             )
         return self.async_show_form(step_id="global", data_schema=_global_schema(self.hass, self.config))
@@ -503,7 +540,7 @@ class RoomClimateOptionsFlow(config_entries.OptionsFlow):
             while room_id in existing_ids:
                 room_id = f"{base}_{counter}"
                 counter += 1
-            room = {CONF_ROOM_ID: room_id, **user_input}
+            room = _normalize_room({CONF_ROOM_ID: room_id, **user_input})
             rooms = self.rooms
             rooms.append(room)
             return self._store({CONF_ROOMS: rooms})
@@ -538,7 +575,7 @@ class RoomClimateOptionsFlow(config_entries.OptionsFlow):
                     room_id = f"{base_id}_{counter}"
                     counter += 1
 
-                rooms.append({CONF_ROOM_ID: room_id, **detected_room})
+                rooms.append(_normalize_room({CONF_ROOM_ID: room_id, **detected_room}))
                 existing_ids.add(room_id)
 
             return self._store({CONF_ROOMS: rooms})
@@ -576,11 +613,17 @@ class RoomClimateOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_edit_room(self, user_input: dict[str, Any] | None = None):
         room = next(room for room in self.rooms if room[CONF_ROOM_ID] == self._editing_room_id)
+        if CONF_CLIMATE not in room:
+            # Older rooms use the auto-detected thermostat; show it in the form so
+            # saving the room keeps it instead of clearing it.
+            coordinator = getattr(self.config_entry, "runtime_data", None)
+            if coordinator is not None:
+                room[CONF_CLIMATE] = coordinator._resolve_climate_entity(room) or ""
         if user_input is not None:
             rooms = self.rooms
             for index, item in enumerate(rooms):
                 if item[CONF_ROOM_ID] == self._editing_room_id:
-                    rooms[index] = {CONF_ROOM_ID: self._editing_room_id, **user_input}
+                    rooms[index] = _normalize_room({CONF_ROOM_ID: self._editing_room_id, **user_input})
                     break
             return self._store({CONF_ROOMS: rooms})
         return self.async_show_form(step_id="edit_room", data_schema=_room_schema(room))
