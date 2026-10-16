@@ -14,7 +14,7 @@ Features:
 - restart-safe ventilation countdown with continued-benefit and close-window guidance
 - forecast windows evaluated from temperature and absolute humidity
 - absolute humidity calculated from temperature and relative humidity when no dedicated sensor is configured (inside and outside)
-- cooling thresholds derived from each room profile (comfort maximum + 2 °C); basements are never ventilated for cooling
+- cooling thresholds derived from each room profile (comfort maximum + 2 °C, at least 24 °C); no cooling advice below 12 °C outside (heating season); basements are never ventilated for cooling
 - hysteresis while a window is open, so advice does not flip around a threshold
 - house-wide daily briefing with weather-based day type and prioritised actions
 - optional `sun.sun` and window orientation handling

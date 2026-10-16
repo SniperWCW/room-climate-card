@@ -198,3 +198,26 @@ def test_forecast_label_mentions_other_days():
     assert label == "morgen 06:00–08:00 Uhr"
     today = house_ventilation.format_time_range(now, now + timedelta(hours=1), now)
     assert today == "20:00–21:00 Uhr"
+
+
+def test_heated_rooms_in_autumn_get_no_cooling_advice():
+    """Regression: 22 °C kitchen/bedroom at 7 °C outside asked for cooling."""
+    weather = _weather(7.4, 85.0)
+    for room_type in ("kitchen", "bedroom"):
+        room = {**ROOM, "room_type": room_type}
+        result = _evaluate(_metrics(22.6, 48.0), weather, room)
+        assert result.ventilate_now is False, room_type
+        assert result.attributes["cooling_level"] == "neutral"
+
+
+def test_warm_room_in_cold_weather_is_told_to_reduce_heating():
+    result = _evaluate(_metrics(25.0, 45.0), _weather(5.0, 80.0))
+    assert result.ventilate_now is False
+    assert "Heizung reduzieren" in result.attributes["cooling_advice"]
+    assert result.next_window is None
+
+
+def test_summer_night_cooling_still_recommended():
+    bedroom = {**ROOM, "room_type": "bedroom"}
+    result = _evaluate(_metrics(26.0, 50.0), _weather(16.0, 60.0), bedroom)
+    assert result.ventilate_now is True
