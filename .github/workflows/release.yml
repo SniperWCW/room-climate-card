@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)publish, e.g. v0.4.2"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Check tag matches manifest version
+        run: |
+          manifest_version=$(python3 -c "import json; print(json.load(open('custom_components/room_climate/manifest.json'))['version'])")
+          if [ "v${manifest_version}" != "${TAG}" ]; then
+            echo "::error::Tag ${TAG} does not match manifest.json version v${manifest_version}"
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Run unit tests
+        run: |
+          pip install pytest
+          python -m pytest -q tests --ignore=tests/integration
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Check card syntax
+        run: node --check custom_components/room_climate/www/room-climate-card.js
+
+      - name: Build integration archive
+        run: |
+          cd custom_components/room_climate
+          zip -r ../../room_climate.zip . -x "__pycache__/*" "*.pyc"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "${TAG}" in
+            *-*) prerelease="--prerelease" ;;
+          esac
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" room_climate.zip --clobber
+          else
+            gh release create "${TAG}" room_climate.zip \
+              --title "${TAG}" \
+              --generate-notes \
+              --verify-tag \
+              ${prerelease}
+          fi
