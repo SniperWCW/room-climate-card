@@ -894,6 +894,10 @@ def evaluate_room(
     cooling_climate = bool(inputs_available and can_cool and not (too_humid_outside and not strong_cooling))
     co2 = as_float(metrics.get(CONF_CO2))
     occupied = parse_presence(metrics.get(CONF_PRESENCE))
+    if occupied is None:
+        # No (usable) room sensor: fall back to "somebody is home".
+        home = metrics.get("home_presence")
+        occupied = home if isinstance(home, bool) else None
     fresh_air = evaluate_fresh_air(
         room_type=room_type,
         co2=co2,

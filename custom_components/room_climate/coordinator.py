@@ -19,6 +19,10 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_CLIMATE,
+    CONF_HOME_PRESENCE,
+    CONF_NOTIFICATION_TAGS,
+    CONF_QUIET_END,
+    CONF_QUIET_START,
     CONF_WALL_QUALITY,
     DEFAULT_WALL_QUALITY,
     NOTIFICATION_MOLD_RISK,
@@ -59,6 +63,17 @@ MOLD_CONFIRM_MINUTES = 60
 # A window that was just opened gets a short grace period before a
 # "close window" push is sent, e.g. when someone briefly airs the room.
 CLOSE_WINDOW_GRACE_MINUTES = 3
+
+# Held back while nobody is home (sent on return if still relevant). Window and
+# mould warnings always get through.
+AWAY_SUPPRESSED_NOTIFICATIONS = {NOTIFICATION_VENTILATE, NOTIFICATION_CLOSE_COVER}
+# In quiet hours only the first mould warning is pushed.
+QUIET_EXEMPT_NOTIFICATIONS = {NOTIFICATION_MOLD_RISK}
+# "Close window" is edge-triggered and tied to an open window, so it must not
+# be swallowed by the cooldown of an earlier push.
+NO_COOLDOWN_NOTIFICATIONS = {NOTIFICATION_CLOSE_WINDOW}
+# A mould risk that lasts is repeated once a day.
+MOLD_REMINDER_INTERVAL = timedelta(hours=24)
 
 _WIND_TO_KMH = {
     "km/h": 1.0,
@@ -441,6 +456,7 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._update_last_aired(room, window_state.state) if window_state is not None else None
         )
         metrics["presence"] = self._get_state(room.get("presence"))
+        metrics["home_presence"] = self._home_present()
         primary_input_ages: dict[str, float | None] = {}
         for key in ("temperature", "humidity"):
             entity_id = room.get(key)
@@ -485,14 +501,40 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         return metrics
 
-    async def _async_send_notification(self, room: RoomResult, notification_type: str) -> None:
+    def _home_present(self) -> bool | None:
+        """Is anybody home? None when no sensor is configured or it is unknown."""
+        entity_id = self.config.get(CONF_HOME_PRESENCE)
+        if not entity_id:
+            return None
+        state = self._get_state(entity_id)
+        if state in ("on", "home"):
+            return True
+        if state in ("off", "not_home"):
+            return False
+        # A person in another zone ("work", ...) is not at home.
+        if state not in (None, "unknown", "unavailable") and entity_id.startswith("person."):
+            return False
+        return None
+
+    def _in_quiet_hours(self, now: datetime) -> bool:
+        start = dt_util.parse_time(str(self.config.get(CONF_QUIET_START) or ""))
+        end = dt_util.parse_time(str(self.config.get(CONF_QUIET_END) or ""))
+        if start is None or end is None or start == end:
+            return False
+        current = dt_util.as_local(now).time().replace(tzinfo=None)
+        if start < end:
+            return start <= current < end
+        return current >= start or current < end
+
+    async def _async_send_notification(
+        self, room: RoomResult, notification_type: str, reminder: bool = False
+    ) -> bool | None:
+        """Send a push. True = sent, False = failed (retry later), None = nothing to send."""
         if not self.config.get(CONF_NOTIFICATION_ENABLED, True):
-            return
+            return None
         service_name = self.config.get(CONF_NOTIFY_SERVICE)
-        if not service_name:
-            return
-        if "." not in service_name:
-            return
+        if not service_name or "." not in service_name:
+            return None
 
         domain, service = service_name.split(".", 1)
         title = f"Raumklima: {room.name}"
@@ -505,16 +547,44 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             NOTIFICATION_MOLD_RISK: room.mold_risk_reason or "Schimmelrisiko an kalten Wänden. Bitte lüften und gleichmäßig heizen.",
         }
         message = message_map[notification_type]
+        if reminder:
+            message = f"Erinnerung: {message}"
 
+        payload: dict[str, Any] = {"title": title, "message": message}
+        if self.config.get(CONF_NOTIFICATION_TAGS, False):
+            payload["data"] = {"tag": self._notification_tag(room.room_id, notification_type)}
+
+        try:
+            await self.hass.services.async_call(domain, service, payload, blocking=False)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("Notification via %s failed: %s", service_name, err)
+            return False
+        return True
+
+    @staticmethod
+    def _notification_tag(room_id: str, notification_type: str) -> str:
+        return f"{DOMAIN}_{room_id}_{notification_type}"
+
+    async def _async_clear_notification(self, room_id: str, notification_type: str) -> None:
+        """Remove a push from the phone once its situation has resolved (Companion App)."""
+        if not self.config.get(CONF_NOTIFICATION_TAGS, False):
+            return
+        service_name = self.config.get(CONF_NOTIFY_SERVICE)
+        if not service_name or "." not in service_name:
+            return
+        domain, service = service_name.split(".", 1)
         try:
             await self.hass.services.async_call(
                 domain,
                 service,
-                {"title": title, "message": message},
+                {
+                    "message": "clear_notification",
+                    "data": {"tag": self._notification_tag(room_id, notification_type)},
+                },
                 blocking=False,
             )
         except Exception as err:  # noqa: BLE001
-            _LOGGER.warning("Notification via %s failed: %s", service_name, err)
+            _LOGGER.debug("Clearing notification via %s failed: %s", service_name, err)
 
     async def _async_process_notifications(
         self,
@@ -524,6 +594,8 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         cooldown_minutes = int(self.config.get(CONF_NOTIFICATION_COOLDOWN, 120))
         cooldown = timedelta(minutes=max(5, cooldown_minutes))
         now = dt_util.now()
+        quiet = self._in_quiet_hours(now)
+        away = self._home_present() is False
         state_changed = False
 
         for room_id, room in rooms.items():
@@ -549,19 +621,50 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for notification_type, is_active in flags.items():
                 key = f"{room_id}:{notification_type}"
                 was_active = self.last_flag_state.get(key, False)
-                if self.last_flag_state.get(key) != is_active:
-                    self.last_flag_state[key] = is_active
-                    state_changed = True
-
-                if not is_active or was_active:
-                    continue
-
                 last_sent = self.last_notification_at.get(key)
-                if last_sent and now - last_sent < cooldown:
+
+                if not is_active:
+                    if self.last_flag_state.get(key) is not False:
+                        self.last_flag_state[key] = False
+                        state_changed = True
+                    if was_active:
+                        await self._async_clear_notification(room_id, notification_type)
                     continue
 
-                await self._async_send_notification(room, notification_type)
-                self.last_notification_at[key] = now
+                held_back = (quiet and notification_type not in QUIET_EXEMPT_NOTIFICATIONS) or (
+                    away and notification_type in AWAY_SUPPRESSED_NOTIFICATIONS
+                )
+                reminder = False
+                if was_active:
+                    # Only a lasting mould risk is repeated (daily, not in quiet hours).
+                    if (
+                        notification_type != NOTIFICATION_MOLD_RISK
+                        or quiet
+                        or last_sent is None
+                        or now - last_sent < MOLD_REMINDER_INTERVAL
+                    ):
+                        continue
+                    reminder = True
+                else:
+                    if held_back:
+                        # Not recorded as active: it is sent as soon as it is allowed again.
+                        continue
+                    if (
+                        notification_type not in NO_COOLDOWN_NOTIFICATIONS
+                        and last_sent
+                        and now - last_sent < cooldown
+                    ):
+                        self.last_flag_state[key] = True
+                        state_changed = True
+                        continue
+
+                sent = await self._async_send_notification(room, notification_type, reminder)
+                if sent is False:
+                    # Failed: leave the state alone so the next refresh tries again.
+                    continue
+                self.last_flag_state[key] = True
+                if sent:
+                    self.last_notification_at[key] = now
                 state_changed = True
 
         if state_changed:

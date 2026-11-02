@@ -13,11 +13,18 @@
           "notification_enabled": "Enable push notifications",
           "notify_service": "Notify service",
           "notification_cooldown": "Push cooldown in minutes",
-          "wall_quality": "Exterior wall insulation"
+          "wall_quality": "Exterior wall insulation",
+          "home_presence": "Someone is home",
+          "quiet_hours_start": "Quiet hours from",
+          "quiet_hours_end": "Quiet hours until",
+          "notification_tags": "Companion app: replace and clear pushes"
         },
         "data_description": {
           "outside_absolute_humidity": "Optional. Without a sensor, it is calculated from the weather entity's temperature and humidity.",
-          "wall_quality": "How cold exterior walls get in winter. Used to estimate the mould risk."
+          "wall_quality": "How cold exterior walls get in winter. Used to estimate the mould risk.",
+          "home_presence": "Optional. Person, group or presence sensor of the household. While nobody is home, ventilation and cover pushes are held back and sent when someone returns (if still relevant). Window and mould warnings are always sent.",
+          "quiet_hours_start": "Optional. In quiet hours only the first mould warning is pushed; held-back messages are sent afterwards if still relevant.",
+          "notification_tags": "Replaces older pushes of the same kind and removes them when the situation has resolved. Only enable for the Home Assistant Companion App (notify.mobile_app_*)."
         }
       }
     },
@@ -53,11 +60,18 @@
           "notification_enabled": "Enable push notifications",
           "notify_service": "Notify service",
           "notification_cooldown": "Push cooldown in minutes",
-          "wall_quality": "Exterior wall insulation"
+          "wall_quality": "Exterior wall insulation",
+          "home_presence": "Someone is home",
+          "quiet_hours_start": "Quiet hours from",
+          "quiet_hours_end": "Quiet hours until",
+          "notification_tags": "Companion app: replace and clear pushes"
         },
         "data_description": {
           "outside_absolute_humidity": "Optional. Without a sensor, it is calculated from the weather entity's temperature and humidity.",
-          "wall_quality": "How cold exterior walls get in winter. Used to estimate the mould risk."
+          "wall_quality": "How cold exterior walls get in winter. Used to estimate the mould risk.",
+          "home_presence": "Optional. Person, group or presence sensor of the household. While nobody is home, ventilation and cover pushes are held back and sent when someone returns (if still relevant). Window and mould warnings are always sent.",
+          "quiet_hours_start": "Optional. In quiet hours only the first mould warning is pushed; held-back messages are sent afterwards if still relevant.",
+          "notification_tags": "Replaces older pushes of the same kind and removes them when the situation has resolved. Only enable for the Home Assistant Companion App (notify.mobile_app_*)."
         }
       },
       "add_room_manual": {

@@ -13,11 +13,18 @@
           "notification_enabled": "Push-Benachrichtigungen aktivieren",
           "notify_service": "Notify-Service",
           "notification_cooldown": "Push-Abstand in Minuten",
-          "wall_quality": "Dämmstandard der Außenwände"
+          "wall_quality": "Dämmstandard der Außenwände",
+          "home_presence": "Jemand ist zu Hause",
+          "quiet_hours_start": "Ruhezeit von",
+          "quiet_hours_end": "Ruhezeit bis",
+          "notification_tags": "Companion-App: Pushes ersetzen und entfernen"
         },
         "data_description": {
           "outside_absolute_humidity": "Optional. Ohne Sensor wird die absolute Außenfeuchte aus Temperatur und Luftfeuchte der Wetter-Entität berechnet.",
-          "wall_quality": "Bestimmt, wie kalt Außenwände im Winter werden. Wird für die Schimmelrisiko-Abschätzung genutzt."
+          "wall_quality": "Bestimmt, wie kalt Außenwände im Winter werden. Wird für die Schimmelrisiko-Abschätzung genutzt.",
+          "home_presence": "Optional. Person, Gruppe oder Anwesenheitssensor des Haushalts. Solange niemand zu Hause ist, werden Lüftungs- und Rollladen-Pushes zurückgehalten und bei Rückkehr gesendet (falls noch relevant). Fenster- und Schimmelwarnungen kommen immer.",
+          "quiet_hours_start": "Optional. In der Ruhezeit wird nur die erste Schimmelwarnung gepusht; zurückgehaltene Meldungen kommen danach, falls noch relevant.",
+          "notification_tags": "Ersetzt ältere Pushes gleicher Art und entfernt sie, wenn sich die Lage erledigt hat. Nur für die Home-Assistant-Companion-App (notify.mobile_app_*) aktivieren."
         }
       }
     },
@@ -53,11 +60,18 @@
           "notification_enabled": "Push-Benachrichtigungen aktivieren",
           "notify_service": "Notify-Service",
           "notification_cooldown": "Push-Abstand in Minuten",
-          "wall_quality": "Dämmstandard der Außenwände"
+          "wall_quality": "Dämmstandard der Außenwände",
+          "home_presence": "Jemand ist zu Hause",
+          "quiet_hours_start": "Ruhezeit von",
+          "quiet_hours_end": "Ruhezeit bis",
+          "notification_tags": "Companion-App: Pushes ersetzen und entfernen"
         },
         "data_description": {
           "outside_absolute_humidity": "Optional. Ohne Sensor wird die absolute Außenfeuchte aus Temperatur und Luftfeuchte der Wetter-Entität berechnet.",
-          "wall_quality": "Bestimmt, wie kalt Außenwände im Winter werden. Wird für die Schimmelrisiko-Abschätzung genutzt."
+          "wall_quality": "Bestimmt, wie kalt Außenwände im Winter werden. Wird für die Schimmelrisiko-Abschätzung genutzt.",
+          "home_presence": "Optional. Person, Gruppe oder Anwesenheitssensor des Haushalts. Solange niemand zu Hause ist, werden Lüftungs- und Rollladen-Pushes zurückgehalten und bei Rückkehr gesendet (falls noch relevant). Fenster- und Schimmelwarnungen kommen immer.",
+          "quiet_hours_start": "Optional. In der Ruhezeit wird nur die erste Schimmelwarnung gepusht; zurückgehaltene Meldungen kommen danach, falls noch relevant.",
+          "notification_tags": "Ersetzt ältere Pushes gleicher Art und entfernt sie, wenn sich die Lage erledigt hat. Nur für die Home-Assistant-Companion-App (notify.mobile_app_*) aktivieren."
         }
       },
       "add_room_manual": {

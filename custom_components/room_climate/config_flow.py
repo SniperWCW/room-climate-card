@@ -26,7 +26,11 @@ from .const import (
     CONF_HUMIDEX_VALUE,
     CONF_HUMIDITY,
     CONF_INSIDE_ABSOLUTE_HUMIDITY,
+    CONF_HOME_PRESENCE,
     CONF_NOTIFICATION_COOLDOWN,
+    CONF_NOTIFICATION_TAGS,
+    CONF_QUIET_END,
+    CONF_QUIET_START,
     CONF_NOTIFICATION_ENABLED,
     CONF_NOTIFY_SERVICE,
     CONF_OUTSIDE_ABSOLUTE_HUMIDITY,
@@ -392,12 +396,26 @@ def _global_schema(hass, defaults: dict[str, Any] | None = None) -> vol.Schema:
     outside_abs_field = _optional_entity_field(CONF_OUTSIDE_ABSOLUTE_HUMIDITY, defaults, "sensor")
     outside_weather_field = _optional_entity_field(CONF_OUTSIDE_WEATHER, defaults, "weather")
     sun_field = _optional_entity_field(CONF_SUN_ENTITY, defaults, "sun")
+    home_field = _optional_entity_field(
+        CONF_HOME_PRESENCE, defaults, ["binary_sensor", "input_boolean", "person", "group"]
+    )
+    quiet_start = (
+        vol.Optional(CONF_QUIET_START, description={"suggested_value": defaults[CONF_QUIET_START]})
+        if defaults.get(CONF_QUIET_START)
+        else vol.Optional(CONF_QUIET_START)
+    )
+    quiet_end = (
+        vol.Optional(CONF_QUIET_END, description={"suggested_value": defaults[CONF_QUIET_END]})
+        if defaults.get(CONF_QUIET_END)
+        else vol.Optional(CONF_QUIET_END)
+    )
     return vol.Schema(
         {
             vol.Required("name", default=defaults.get("title", DEFAULT_NAME)): selector.TextSelector(),
             outside_abs_field[0]: outside_abs_field[1],
             outside_weather_field[0]: outside_weather_field[1],
             sun_field[0]: sun_field[1],
+            home_field[0]: home_field[1],
             vol.Required(CONF_WALL_QUALITY, default=defaults.get(CONF_WALL_QUALITY, DEFAULT_WALL_QUALITY)): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[
@@ -414,6 +432,9 @@ def _global_schema(hass, defaults: dict[str, Any] | None = None) -> vol.Schema:
             vol.Required(CONF_NOTIFICATION_COOLDOWN, default=defaults.get(CONF_NOTIFICATION_COOLDOWN, DEFAULT_NOTIFICATION_COOLDOWN)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=5, max=1440, step=5, unit_of_measurement="min", mode=selector.NumberSelectorMode.BOX)
             ),
+            quiet_start: selector.TimeSelector(),
+            quiet_end: selector.TimeSelector(),
+            vol.Required(CONF_NOTIFICATION_TAGS, default=defaults.get(CONF_NOTIFICATION_TAGS, False)): selector.BooleanSelector(),
         }
     )
 
@@ -502,6 +523,10 @@ class RoomClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_NOTIFICATION_ENABLED: user_input.get(CONF_NOTIFICATION_ENABLED, True),
                 CONF_NOTIFY_SERVICE: user_input.get(CONF_NOTIFY_SERVICE, ""),
                 CONF_NOTIFICATION_COOLDOWN: int(user_input.get(CONF_NOTIFICATION_COOLDOWN, DEFAULT_NOTIFICATION_COOLDOWN)),
+                CONF_HOME_PRESENCE: user_input.get(CONF_HOME_PRESENCE, ""),
+                CONF_QUIET_START: user_input.get(CONF_QUIET_START, ""),
+                CONF_QUIET_END: user_input.get(CONF_QUIET_END, ""),
+                CONF_NOTIFICATION_TAGS: user_input.get(CONF_NOTIFICATION_TAGS, False),
                 CONF_WALL_QUALITY: user_input.get(CONF_WALL_QUALITY, DEFAULT_WALL_QUALITY),
                 CONF_ROOMS: [],
             }
@@ -567,6 +592,10 @@ class RoomClimateOptionsFlow(config_entries.OptionsFlow):
                     CONF_NOTIFICATION_ENABLED: user_input.get(CONF_NOTIFICATION_ENABLED, True),
                     CONF_NOTIFY_SERVICE: user_input.get(CONF_NOTIFY_SERVICE, ""),
                     CONF_NOTIFICATION_COOLDOWN: int(user_input.get(CONF_NOTIFICATION_COOLDOWN, DEFAULT_NOTIFICATION_COOLDOWN)),
+                    CONF_HOME_PRESENCE: user_input.get(CONF_HOME_PRESENCE, ""),
+                    CONF_QUIET_START: user_input.get(CONF_QUIET_START, ""),
+                    CONF_QUIET_END: user_input.get(CONF_QUIET_END, ""),
+                    CONF_NOTIFICATION_TAGS: user_input.get(CONF_NOTIFICATION_TAGS, False),
                     CONF_WALL_QUALITY: user_input.get(CONF_WALL_QUALITY, DEFAULT_WALL_QUALITY),
                 }
             )

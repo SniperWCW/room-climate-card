@@ -422,3 +422,18 @@ def test_co2_pushes_and_message_uses_only_the_active_reason():
     assert result.attributes["notification_flags"][logic.NOTIFICATION_VENTILATE] is True
     advice = result.attributes["ventilate_advice"]
     assert advice.startswith("Fenster öffnen") and "geschlossen halten" not in advice
+
+
+def test_household_presence_is_the_fallback_for_missing_room_sensor(monkeypatch):
+    noon = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(logic.dt_util, "now", lambda: noon)
+    weather = _weather(4.0, 80.0)
+    away = _evaluate(_metrics(21.0, 45.0, hours_since_aired=7.0, home_presence=False), weather)
+    assert away.ventilate_now is False
+    home = _evaluate(_metrics(21.0, 45.0, hours_since_aired=7.0, home_presence=True), weather)
+    assert home.attributes["notification_flags"][logic.NOTIFICATION_VENTILATE] is True
+    # A room sensor wins over the household sensor.
+    room_empty = _evaluate(
+        _metrics(21.0, 45.0, hours_since_aired=7.0, presence="off", home_presence=True), weather
+    )
+    assert room_empty.ventilate_now is False
