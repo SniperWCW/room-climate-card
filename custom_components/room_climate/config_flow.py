@@ -136,6 +136,11 @@ def _find_global_sun_entity(hass) -> str:
     )
 
 
+# Presence can come from many kinds of entities, e.g. a template sensor with the
+# states "home" / "not_home".
+PRESENCE_DOMAINS = ["binary_sensor", "input_boolean", "person", "group", "sensor"]
+
+
 def _optional_entity_field(
     key: str,
     defaults: dict[str, Any],
@@ -397,7 +402,7 @@ def _global_schema(hass, defaults: dict[str, Any] | None = None) -> vol.Schema:
     outside_weather_field = _optional_entity_field(CONF_OUTSIDE_WEATHER, defaults, "weather")
     sun_field = _optional_entity_field(CONF_SUN_ENTITY, defaults, "sun")
     home_field = _optional_entity_field(
-        CONF_HOME_PRESENCE, defaults, ["binary_sensor", "input_boolean", "person", "group"]
+        CONF_HOME_PRESENCE, defaults, PRESENCE_DOMAINS
     )
     quiet_start = (
         vol.Optional(CONF_QUIET_START, description={"suggested_value": defaults[CONF_QUIET_START]})
@@ -465,7 +470,7 @@ def _room_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     cover_field = _optional_entity_field(CONF_COVER, defaults, "cover")
     climate_field = _optional_entity_field(CONF_CLIMATE, defaults, "climate")
     co2_field = _optional_entity_field(CONF_CO2, defaults, "sensor")
-    presence_field = _optional_entity_field(CONF_PRESENCE, defaults, ["binary_sensor", "input_boolean"])
+    presence_field = _optional_entity_field(CONF_PRESENCE, defaults, PRESENCE_DOMAINS)
     humidex_value_field = _optional_entity_field(CONF_HUMIDEX_VALUE, defaults, "sensor")
     scharlau_field = _optional_entity_field(CONF_SCHARLAU, defaults, "sensor")
     humidex_field = _optional_entity_field(CONF_HUMIDEX, defaults, "sensor")

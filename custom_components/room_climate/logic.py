@@ -329,7 +329,7 @@ def parse_presence(value: Any) -> bool | None:
     """Interpret the state of a presence entity: True/False, None if unknown."""
     if value in ("on", "home", "occupied", "detected"):
         return True
-    if value in ("off", "not_home", "clear"):
+    if value in ("off", "not_home", "away", "clear"):
         return False
     return None
 

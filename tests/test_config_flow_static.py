@@ -42,3 +42,9 @@ def test_optional_entities_use_suggested_values():
     helper = SOURCE.split("def _optional_entity_field", 1)[1].split("\ndef ", 1)[0]
     assert "suggested_value" in helper
     assert "default=defaults[key]" not in helper
+
+
+def test_presence_fields_accept_plain_sensors():
+    source = (Path(__file__).parents[1] / "custom_components" / "room_climate" / "config_flow.py").read_text()
+    assert '"sensor"' in source.split("PRESENCE_DOMAINS = ")[1].split("\n")[0]
+    assert source.count("PRESENCE_DOMAINS") >= 3

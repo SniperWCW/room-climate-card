@@ -509,7 +509,7 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         state = self._get_state(entity_id)
         if state in ("on", "home"):
             return True
-        if state in ("off", "not_home"):
+        if state in ("off", "not_home", "away"):
             return False
         # A person in another zone ("work", ...) is not at home.
         if state not in (None, "unknown", "unavailable") and entity_id.startswith("person."):
