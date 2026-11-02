@@ -14,6 +14,7 @@ from homeassistant.helpers import area_registry as ar, device_registry as dr, en
 
 from .const import (
     CONF_CLIMATE,
+    CONF_CO2,
     CONF_COVER,
     CONF_WALL_QUALITY,
     DEFAULT_WALL_QUALITY,
@@ -88,6 +89,7 @@ def _has_room_supporting_signals(room: dict[str, Any]) -> bool:
         room.get(CONF_INSIDE_ABSOLUTE_HUMIDITY)
         or room.get(CONF_WINDOW)
         or room.get(CONF_COVER)
+        or room.get(CONF_CO2)
         or room.get(CONF_HUMIDEX_VALUE)
         or room.get(CONF_SCHARLAU)
         or room.get(CONF_HUMIDEX)
@@ -242,6 +244,7 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
                 CONF_WINDOW: "",
                 CONF_COVER: "",
                 CONF_CLIMATE: "",
+                CONF_CO2: "",
                 CONF_HUMIDEX_VALUE: "",
                 CONF_SCHARLAU: "",
                 CONF_HUMIDEX: "",
@@ -284,6 +287,7 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
             or find_entity_for_area(area.id, ("shade",), ("cover",))
         )
         room[CONF_CLIMATE] = room[CONF_CLIMATE] or find_heating_thermostat(area.id)
+        room[CONF_CO2] = room[CONF_CO2] or find_by_device_class(area.id, "carbon_dioxide", {"ppm"})
         room[CONF_HUMIDEX_VALUE] = room[CONF_HUMIDEX_VALUE] or find_entity_for_area(area.id, ("thermal_comfort", "humidex"))
         room[CONF_SCHARLAU] = room[CONF_SCHARLAU] or find_entity_for_area(area.id, ("thermal_comfort", "sommer_scharlau_gefuhlt"))
         room[CONF_HUMIDEX] = room[CONF_HUMIDEX] or find_entity_for_area(area.id, ("thermal_comfort", "humidex_gefuhlt"))
@@ -426,6 +430,7 @@ def _room_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     window_field = _optional_entity_field(CONF_WINDOW, defaults, "binary_sensor")
     cover_field = _optional_entity_field(CONF_COVER, defaults, "cover")
     climate_field = _optional_entity_field(CONF_CLIMATE, defaults, "climate")
+    co2_field = _optional_entity_field(CONF_CO2, defaults, "sensor")
     humidex_value_field = _optional_entity_field(CONF_HUMIDEX_VALUE, defaults, "sensor")
     scharlau_field = _optional_entity_field(CONF_SCHARLAU, defaults, "sensor")
     humidex_field = _optional_entity_field(CONF_HUMIDEX, defaults, "sensor")
@@ -450,6 +455,7 @@ def _room_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             window_field[0]: window_field[1],
             cover_field[0]: cover_field[1],
             climate_field[0]: climate_field[1],
+            co2_field[0]: co2_field[1],
             humidex_value_field[0]: humidex_value_field[1],
             scharlau_field[0]: scharlau_field[1],
             humidex_field[0]: humidex_field[1],

@@ -170,6 +170,7 @@ class RoomClimateScoreSensor(RoomClimateBaseSensor):
             "recommendation",
             "dehumidify_advice",
             "cooling_advice",
+            "fresh_air_advice",
             "next_ventilation_window",
             "close_window_reason",
             "close_cover_reason",

@@ -8,6 +8,7 @@ from typing import Any
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_CO2,
     CONF_COVER,
     CONF_DEWPOINT,
     CONF_HUMIDEX,
@@ -70,6 +71,31 @@ MIN_COOLING_START = 24.0
 # Below this outside temperature it is heating season: cooling a room by
 # ventilating only wastes heating energy, so no cooling advice is given.
 MIN_OUTSIDE_TEMP_FOR_COOLING = 12.0
+
+# Fresh air: independent of humidity and cooling, rooms need air exchange to
+# remove CO2, odours and pollutants (oxygen itself hardly drops). With a CO2
+# sensor the advice follows the measured value, without one a reminder appears
+# after a few hours without ventilation during the day.
+CO2_MODERATE = 1000.0
+CO2_STRONG = 1400.0
+# While the window is open the advice is kept until CO2 is clearly lower.
+CO2_OPEN_RELAX = 200.0
+FRESH_AIR_INTERVAL_HOURS = 5.0
+FRESH_AIR_DAY_START = 7
+FRESH_AIR_DAY_END = 21
+# Rooms without a time-based reminder (humidity logic covers them or fresh air
+# is not a goal).
+FRESH_AIR_NO_REMINDER_ROOMS = {"bathroom", "basement"}
+# Do not air for fresh air when the outside air is this much warmer than the room.
+FRESH_AIR_MAX_OUTSIDE_WARMER = 2.0
+
+
+def _without_keep_closed(text: str | None) -> str | None:
+    """Drop a leading "Fenster geschlossen halten." sentence from an advice text."""
+    prefix = "Fenster geschlossen halten. "
+    if text and text.startswith(prefix):
+        return text[len(prefix):] or None
+    return text
 
 
 def _de(value: float) -> str:
@@ -296,6 +322,121 @@ def get_cooling_duration(cooling_delta: float, wind_speed: float | None, wind_ad
             duration += 1
     duration += wind_adjustment
     return max(5, duration)
+
+
+def get_co2_level(co2: float | None) -> str | None:
+    if co2 is None:
+        return None
+    if co2 < 800:
+        return "good"
+    if co2 < CO2_MODERATE:
+        return "ok"
+    if co2 < CO2_STRONG:
+        return "elevated"
+    return "high"
+
+
+def get_fresh_air_duration(outside_temp: float | None, strong: bool) -> int:
+    """Short burst ventilation: the colder it is outside, the shorter."""
+    if outside_temp is None:
+        duration = 8
+    elif outside_temp < 5:
+        duration = 5
+    elif outside_temp < 12:
+        duration = 7
+    elif outside_temp < 20:
+        duration = 10
+    else:
+        duration = 12
+    return duration + 3 if strong else duration
+
+
+def evaluate_fresh_air(
+    *,
+    room_type: str,
+    co2: float | None,
+    window_open: bool,
+    window_open_minutes: float | None,
+    hours_since_aired: float | None,
+    local_hour: int,
+    outside_temp: float | None,
+    inside_temp: float | None,
+    too_humid_outside: bool,
+) -> dict[str, Any]:
+    """Decide whether airing is useful just to exchange the room air.
+
+    Returns ``active`` (airing is useful now), ``strong``, the ``source``
+    ("co2" or "time"), the recommended ``duration`` in minutes, a ``text`` and
+    a ``level`` ("recommended", "short", "open" or None).
+    """
+    result: dict[str, Any] = {
+        "active": False,
+        "strong": False,
+        "source": None,
+        "duration": None,
+        "text": None,
+        "level": None,
+    }
+    outside_too_warm = bool(
+        outside_temp is not None
+        and inside_temp is not None
+        and outside_temp > inside_temp + FRESH_AIR_MAX_OUTSIDE_WARMER
+    )
+
+    if co2 is not None:
+        relax = CO2_OPEN_RELAX if window_open else 0.0
+        strong = co2 >= CO2_STRONG - relax
+        needed = co2 >= CO2_MODERATE - relax
+        # Very high CO2 is aired out even when the outside air is not ideal.
+        if needed and not strong and (too_humid_outside or outside_too_warm):
+            needed = False
+        duration = get_fresh_air_duration(outside_temp, strong)
+        result.update(source="co2", strong=strong, duration=duration)
+        if not needed:
+            return result
+        result["active"] = True
+        if window_open:
+            result["level"] = "open"
+            result["text"] = f"Fenster ist offen, Frischluft läuft (CO₂ {co2:.0f} ppm)"
+        elif strong:
+            result["level"] = "recommended"
+            result["text"] = (
+                f"Fenster öffnen. Die Luft ist verbraucht (CO₂ {co2:.0f} ppm), ca. {duration} Min. stoßlüften."
+            )
+        else:
+            result["level"] = "short"
+            result["text"] = (
+                f"Fenster kurz öffnen. Die Luft wird verbraucht (CO₂ {co2:.0f} ppm), ca. {duration} Min. stoßlüften."
+            )
+        return result
+
+    if room_type in FRESH_AIR_NO_REMINDER_ROOMS:
+        return result
+
+    duration = get_fresh_air_duration(outside_temp, False)
+    result.update(source="time", duration=duration)
+    if window_open:
+        # Without a sensor the airing is simply timed.
+        if window_open_minutes is not None and window_open_minutes < duration:
+            result["active"] = True
+            result["level"] = "open"
+            result["text"] = "Fenster ist offen, Frischluft läuft"
+        return result
+
+    if (
+        hours_since_aired is not None
+        and hours_since_aired >= FRESH_AIR_INTERVAL_HOURS
+        and FRESH_AIR_DAY_START <= local_hour < FRESH_AIR_DAY_END
+        and not too_humid_outside
+        and not outside_too_warm
+    ):
+        result["active"] = True
+        result["level"] = "short"
+        result["text"] = (
+            f"Fenster kurz öffnen. Seit über {int(hours_since_aired)} Std. nicht gelüftet – "
+            f"ca. {duration} Min. stoßlüften für frische Luft."
+        )
+    return result
 
 
 def get_display_level(score: int) -> dict[str, str]:
@@ -734,8 +875,24 @@ def evaluate_room(
         )
     )
     cooling_climate = bool(inputs_available and can_cool and not (too_humid_outside and not strong_cooling))
-    outside_air_beneficial = dehumidify_climate or cooling_climate
-    ventilation_beneficial = has_window and outside_air_beneficial
+    co2 = as_float(metrics.get(CONF_CO2))
+    fresh_air = evaluate_fresh_air(
+        room_type=room_type,
+        co2=co2,
+        window_open=window_open,
+        window_open_minutes=as_float(metrics.get("window_open_minutes")),
+        hours_since_aired=as_float(metrics.get("hours_since_aired")),
+        local_hour=dt_util.now().hour,
+        outside_temp=outside_temp,
+        inside_temp=inside_temp,
+        too_humid_outside=too_humid_outside,
+    )
+    # Time-based reminders need the window contact; a measured CO2 value does not.
+    fresh_air_active = bool(fresh_air["active"] and (has_window or fresh_air["source"] == "co2"))
+    outside_air_beneficial = dehumidify_climate or cooling_climate or fresh_air_active
+    ventilation_beneficial = bool(
+        (has_window and outside_air_beneficial) or (fresh_air_active and fresh_air["source"] == "co2")
+    )
 
     cooling_window = get_next_cooling_window(room, forecast, solar_exposure)
 
@@ -857,6 +1014,13 @@ def evaluate_room(
     )
 
     recommendation_parts = []
+    fresh_air_text = fresh_air["text"] if fresh_air_active else None
+    if fresh_air_text:
+        recommendation_parts.append(f"Frischluft: {fresh_air_text}")
+        if not window_open:
+            # "Keep the window closed" must not contradict the fresh-air advice.
+            dehumidify_text = _without_keep_closed(dehumidify_text)
+            cooling_text = _without_keep_closed(cooling_text)
     if dehumidify_text:
         recommendation_parts.append(f"Entfeuchtung: {dehumidify_text}")
     if cooling_text:
@@ -940,6 +1104,14 @@ def evaluate_room(
         "cooling_level": cooling_level,
         "cooling_start_temperature": cooling_start,
         "next_ventilation_window": next_window,
+        "co2": co2,
+        "co2_level": get_co2_level(co2),
+        "fresh_air_needed": fresh_air_active,
+        "fresh_air_source": fresh_air["source"] if fresh_air_active else None,
+        "fresh_air_advice": fresh_air_text,
+        "fresh_air_level": fresh_air["level"] if fresh_air_active else None,
+        "fresh_air_duration": fresh_air["duration"] if fresh_air_active else None,
+        "hours_since_aired": metrics.get("hours_since_aired"),
         "outside_air_beneficial": outside_air_beneficial,
         "ventilation_beneficial": ventilation_beneficial,
         "ventilate_now": ventilate_now,

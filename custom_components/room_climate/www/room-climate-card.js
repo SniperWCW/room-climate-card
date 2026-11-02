@@ -218,6 +218,10 @@ class RoomClimateCard extends HTMLElement {
         dehumidifyLevel: attrs.dehumidify_level || null,
         coolingAdvice: esc(attrs.cooling_advice || ""),
         coolingLevel: attrs.cooling_level || null,
+        freshAirAdvice: esc(attrs.fresh_air_advice || ""),
+        freshAirLevel: attrs.fresh_air_level || null,
+        co2: this.num(attrs.co2),
+        co2Level: attrs.co2_level || null,
         nextWindow: esc(attrs.next_ventilation_window || ""),
         windowKnown: typeof attrs.window_open === "boolean",
         windowOpen: attrs.window_open === true,
@@ -1511,6 +1515,10 @@ class RoomClimateCard extends HTMLElement {
     if (room.reduceHeating) add("warn", "mdi:radiator-off", room.reduceHeatingReason);
     if (room.moldActive) add("error", "mdi:water-alert", room.moldReason);
     if (room.closeCover) add("info", "mdi:roller-shade-closed", room.closeCoverReason);
+    if (["recommended", "short"].includes(room.freshAirLevel)) add("info", "mdi:air-filter", room.freshAirAdvice);
+    if (room.freshAirLevel === "open" && room.windowOpen && !room.closeWindow) {
+      add("ok", "mdi:window-open-variant", room.freshAirAdvice);
+    }
     if (["recommended", "short"].includes(room.dehumidifyLevel)) add("info", "mdi:water-minus", room.dehumidifyAdvice);
     if (room.coolingLevel === "cooling") add("info", "mdi:snowflake-thermometer", room.coolingAdvice);
     if (room.dehumidifyLevel === "open" && room.windowOpen && !room.closeWindow) {
@@ -1526,6 +1534,12 @@ class RoomClimateCard extends HTMLElement {
       `<span class="rc-chip"><ha-icon icon="mdi:thermometer"></ha-icon>${this.fmt(room.temperature)} °C</span>`,
       `<span class="rc-chip"><ha-icon icon="mdi:water-percent"></ha-icon>${this.fmt(room.humidity, 0)} %</span>`,
     ];
+    if (room.co2 !== null) {
+      const tone = { elevated: "warn", high: "error" }[room.co2Level];
+      chips.push(
+        `<span class="rc-chip${tone ? ` rc-chip--${tone}` : ""}" title="CO₂-Gehalt der Raumluft"><ha-icon icon="mdi:molecule-co2"></ha-icon>${this.fmt(room.co2, 0)} ppm</span>`
+      );
+    }
     if (room.windowOpen) chips.push(`<span class="rc-chip rc-chip--info"><ha-icon icon="mdi:window-open-variant"></ha-icon>Fenster offen</span>`);
     if (room.heatingActive) {
       chips.push(

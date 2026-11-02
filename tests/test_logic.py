@@ -284,3 +284,96 @@ def test_heating_thermostat_blocks_cooling_advice_on_mild_days():
     assert result.ventilate_now is False
     assert "Heizung läuft" in result.attributes["cooling_advice"]
     assert result.reduce_heating is True
+
+
+# --- Fresh air (CO2 sensor optional) ---------------------------------------
+
+def _fresh(**overrides):
+    params = {
+        "room_type": "living",
+        "co2": None,
+        "window_open": False,
+        "window_open_minutes": None,
+        "hours_since_aired": None,
+        "local_hour": 12,
+        "outside_temp": 4.0,
+        "inside_temp": 21.0,
+        "too_humid_outside": False,
+    }
+    params.update(overrides)
+    return logic.evaluate_fresh_air(**params)
+
+
+def test_co2_moderate_and_strong_levels():
+    assert _fresh(co2=700)["active"] is False
+    moderate = _fresh(co2=1100)
+    assert moderate["active"] is True and moderate["level"] == "short" and moderate["strong"] is False
+    strong = _fresh(co2=1600)
+    assert strong["level"] == "recommended" and strong["strong"] is True
+    assert strong["duration"] > moderate["duration"]
+
+
+def test_co2_hysteresis_while_window_is_open():
+    assert _fresh(co2=900)["active"] is False
+    assert _fresh(co2=900, window_open=True)["active"] is True
+    assert _fresh(co2=700, window_open=True)["active"] is False
+
+
+def test_co2_overrides_good_outside_conditions_only_when_strong():
+    assert _fresh(co2=1100, too_humid_outside=True)["active"] is False
+    assert _fresh(co2=1600, too_humid_outside=True)["active"] is True
+    assert _fresh(co2=1100, outside_temp=30.0, inside_temp=24.0)["active"] is False
+
+
+def test_time_based_reminder_without_sensor():
+    assert _fresh(hours_since_aired=2.0)["active"] is False
+    reminder = _fresh(hours_since_aired=6.0)
+    assert reminder["active"] is True and reminder["source"] == "time"
+    # Not at night, not in bathroom/basement, not while unknown.
+    assert _fresh(hours_since_aired=6.0, local_hour=2)["active"] is False
+    assert _fresh(hours_since_aired=6.0, room_type="bathroom")["active"] is False
+    assert _fresh(hours_since_aired=None)["active"] is False
+
+
+def test_time_based_airing_ends_after_planned_duration():
+    assert _fresh(window_open=True, window_open_minutes=2.0)["active"] is True
+    assert _fresh(window_open=True, window_open_minutes=30.0)["active"] is False
+
+
+def test_room_recommends_fresh_air_in_winter_without_humidity_or_cooling_reason():
+    weather = _weather(4.0, 80.0)
+    quiet = _evaluate(_metrics(21.0, 45.0), weather)
+    assert quiet.ventilate_now is False
+
+    stale_air = _evaluate(_metrics(21.0, 45.0, co2=1500.0), weather)
+    assert stale_air.ventilate_now is True
+    assert stale_air.attributes["fresh_air_needed"] is True
+    assert stale_air.attributes["fresh_air_source"] == "co2"
+    assert stale_air.recommendation.startswith("Frischluft: Fenster öffnen")
+    assert "geschlossen halten" not in stale_air.recommendation
+
+    # The same room with the window open keeps the advice until CO2 drops.
+    opened = _evaluate(_metrics(21.0, 45.0, window="on", co2=1500.0), weather)
+    assert opened.close_window is False
+    aired = _evaluate(_metrics(21.0, 45.0, window="on", co2=600.0), weather)
+    assert aired.close_window is True
+
+
+def test_room_without_window_sensor_still_uses_measured_co2():
+    room = {k: v for k, v in ROOM.items() if k not in {"window"}}
+    weather = _weather(4.0, 80.0)
+    result = _evaluate(_metrics(21.0, 45.0, window=None, co2=1500.0), weather, room)
+    assert result.ventilate_now is True
+
+
+def test_room_time_reminder_requires_window_sensor(monkeypatch):
+    noon = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(logic.dt_util, "now", lambda: noon)
+    weather = _weather(4.0, 80.0)
+    with_sensor = _evaluate(_metrics(21.0, 45.0, hours_since_aired=7.0), weather)
+    assert with_sensor.attributes["fresh_air_needed"] is True
+    assert with_sensor.attributes["fresh_air_source"] == "time"
+    assert with_sensor.ventilate_now is True
+    room = {k: v for k, v in ROOM.items() if k not in {"window"}}
+    without = _evaluate(_metrics(21.0, 45.0, window=None, hours_since_aired=7.0), weather, room)
+    assert without.attributes["fresh_air_needed"] is False

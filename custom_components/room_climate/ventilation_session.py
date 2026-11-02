@@ -103,8 +103,8 @@ def update_sessions(
             elif valid and not beneficial:
                 session["finished"] = True
                 session["reason"] = (
-                    "Die Außenluft bringt diesem Raum keinen weiteren Feuchte- "
-                    "oder Temperaturvorteil."
+                    "Die Außenluft bringt diesem Raum keinen weiteren Feuchte-, "
+                    "Temperatur- oder Frischluftvorteil."
                 )
             elif elapsed >= session["planned_minutes"] and not valid:
                 session["finished"] = True

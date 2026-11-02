@@ -8,6 +8,7 @@ Features:
 
 - room climate scoring per room
 - separate advice for dehumidifying and cooling
+- fresh-air advice independent of humidity and cooling: optional CO₂ sensor per room (advice from about 1000 ppm, stronger from 1400 ppm) or, without a sensor, a reminder after several hours without ventilation during the day
 - hourly ventilation window forecast from `weather.*`
 - house-wide cross-ventilation and shock-ventilation recommendations
 - immediate updates when a configured window contact changes
@@ -63,6 +64,8 @@ For the whole installation, the integration creates:
 - `sensor.room_climate_nachstes_luftungsfenster` with the best forecast window
 
 The day briefing classifies the next 24 hours as a cool, mild, summer, or hot day. Its attributes contain the forecast range, average room score, most affected room, and a ready-to-use action summary for dashboards and automations. The bundled card displays this briefing automatically.
+
+**Fresh air.** Besides drying and cooling, rooms need an air exchange to remove CO₂, odours and pollutants. If a room has a CO₂ sensor (optional; auto-detected by `device_class: carbon_dioxide` in the room's area), the card recommends short burst ventilation from 1000 ppm and a stronger advice from 1400 ppm; while the window is open the advice is kept until the value is clearly lower (about 800 ppm). Without a CO₂ sensor, rooms with a window contact get a reminder when the window has been closed for 5 hours or more, between 07:00 and 21:00 (not for bathrooms and basements); the timer restarts after a Home Assistant restart. Fresh-air advice is held back when the outside air is much more humid or warmer than the room, unless CO₂ is very high. The attributes `co2`, `co2_level`, `fresh_air_needed`, `fresh_air_source`, `fresh_air_advice`, `fresh_air_duration` and `hours_since_aired` are available on the score sensor.
 
 The house-wide ventilation sensor is derived from the per-room decisions, so it never recommends ventilation that the rooms would reject. It combines the configured room windows and their orientations. Opposing orientations are used for cross-ventilation guidance. When a window opens, its state updates immediately and a restart-safe countdown begins. Current room values are checked throughout the session, so the recommendation changes to `Lüften beenden` as soon as the outside-air advantage ends. If the advantage still exists after the calculated minimum time, it changes to `Weiterlüften`. A maximum of 10 minutes in cold weather (below 5 °C) and 20 minutes otherwise prevents an open-ended recommendation. When a session ends, the room's `close_window` binary sensor turns on and a push notification is sent. The sensor state only changes with the phase; the remaining minutes are available in the `session_detail` and `session_remaining_minutes` attributes. The forecast sensor calculates expected absolute humidity from hourly temperature and relative humidity and groups suitable hours into one recommended window. Both recommendations are also displayed as separate blocks in the bundled card.
 

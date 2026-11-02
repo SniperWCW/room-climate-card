@@ -373,12 +373,25 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "dewpoint",
             "window",
             "cover",
+            "co2",
         ):
             entity_id = room.get(key)
             if key in {"scharlau", "humidex", "simmer", "dewpoint", "window", "cover"}:
                 metrics[key] = self._get_state(entity_id)
             else:
                 metrics[key] = as_float(self._get_state(entity_id))
+        # How long the window has been open / closed (for the fresh-air advice).
+        # A restart resets the state's last_changed, which restarts the timer.
+        metrics["window_open_minutes"] = None
+        metrics["hours_since_aired"] = None
+        window_entity = room.get("window")
+        window_state = self.hass.states.get(window_entity) if window_entity else None
+        if window_state is not None:
+            age_hours = (dt_util.utcnow() - window_state.last_changed).total_seconds() / 3600
+            if window_state.state in OPEN_STATES:
+                metrics["window_open_minutes"] = round(age_hours * 60, 1)
+            elif window_state.state in {"off", "closed"}:
+                metrics["hours_since_aired"] = round(age_hours, 2)
         primary_input_ages: dict[str, float | None] = {}
         for key in ("temperature", "humidity"):
             entity_id = room.get(key)
