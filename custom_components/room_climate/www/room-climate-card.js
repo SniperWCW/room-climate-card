@@ -247,6 +247,7 @@ class RoomClimateCard extends HTMLElement {
           tempMax: this.num(attrs.comfort_temperature_max),
           humidityMin: this.num(attrs.comfort_humidity_min),
           humidityMax: this.num(attrs.comfort_humidity_max),
+          season: attrs.humidity_target_season || null,
         },
       };
     });
@@ -1570,7 +1571,7 @@ class RoomClimateCard extends HTMLElement {
       ? ""
       : [
           comfort.tempMin !== null
-            ? `Zielbereich ${this.fmt(comfort.tempMin, 0)}–${this.fmt(comfort.tempMax, 0)} °C · ${this.fmt(comfort.humidityMin, 0)}–${this.fmt(comfort.humidityMax, 0)} %`
+            ? `Zielbereich ${this.fmt(comfort.tempMin, 0)}–${this.fmt(comfort.tempMax, 0)} °C · ${this.fmt(comfort.humidityMin, 0)}–${this.fmt(comfort.humidityMax, 0)} %${{ winter: " (Winter-Ziel)", summer: " (Sommer-Ziel)" }[comfort.season] || ""}`
             : "",
           room.absoluteHumidity !== null ? `Absolute Feuchte ${this.fmt(room.absoluteHumidity)} g/m³` : "",
           room.orientationLabel ? `Fenster ${room.orientationLabel}${room.solarExposure ? ` · ${room.solarExposure}` : ""}` : "",

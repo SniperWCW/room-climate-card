@@ -129,10 +129,10 @@ def test_stale_inputs_never_trigger_actions():
 
 def test_hysteresis_keeps_window_open_slightly_below_threshold():
     weather = _weather(4.0, 80.0)
-    # Profile maximum for living rooms is 55 %.
-    assert _evaluate(_metrics(21.0, 54.0, window="off"), weather).ventilate_now is False
-    assert _evaluate(_metrics(21.0, 54.0, window="on"), weather).close_window is False
-    assert _evaluate(_metrics(21.0, 50.0, window="on"), weather).close_window is True
+    # Living-room maximum is 55 %, lowered to 51.7 % at 4 °C outside.
+    assert _evaluate(_metrics(21.0, 51.0, window="off"), weather).ventilate_now is False
+    assert _evaluate(_metrics(21.0, 51.0, window="on"), weather).close_window is False
+    assert _evaluate(_metrics(21.0, 47.0, window="on"), weather).close_window is True
 
 
 def test_session_finish_forces_close_window():
@@ -437,3 +437,62 @@ def test_household_presence_is_the_fallback_for_missing_room_sensor(monkeypatch)
         _metrics(21.0, 45.0, hours_since_aired=7.0, presence="off", home_presence=True), weather
     )
     assert room_empty.ventilate_now is False
+
+
+# --- Seasonal humidity targets ----------------------------------------------
+
+LIVING = {"humidity_min": 40, "humidity_max": 55, "temp_min": 16, "temp_max": 22}
+
+
+def _targets(outside, room_type="living"):
+    adjusted = logic.apply_seasonal_humidity(room_type, LIVING, outside)
+    return adjusted["humidity_min"], adjusted["humidity_max"]
+
+
+def test_targets_follow_the_outside_temperature():
+    assert _targets(None) == (40, 55)
+    assert _targets(15.0) == (40, 55)
+    assert _targets(10.0) == (40, 53.5)
+    assert _targets(0.0) == (40, 50.5)
+    assert _targets(-10.0) == (36.0, 47.5)
+    assert _targets(-30.0) == (36.0, 47.0)  # drops are capped
+    assert _targets(25.0) == (40, 60)
+    assert _targets(25.0, "basement")[1] == 55  # a basement gets no summer bonus
+
+
+def test_upper_target_never_falls_below_the_lower_one():
+    adjusted = logic.apply_seasonal_humidity(
+        "living", {"humidity_min": 40, "humidity_max": 44, "temp_min": 16, "temp_max": 22}, -10.0
+    )
+    assert adjusted["humidity_max"] >= adjusted["humidity_min"] + 8
+
+
+def test_season_names():
+    assert logic.get_season(2.0) == "winter"
+    assert logic.get_season(12.0) == "transition"
+    assert logic.get_season(22.0) == "summer"
+    assert logic.get_season(None) is None
+
+
+def test_effective_outside_temperature_uses_the_next_24_hours():
+    now = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
+    forecast = [
+        {"datetime": (now + timedelta(hours=h)).isoformat(), "temperature": 10.0 - h * 0.5}
+        for h in range(1, 13)
+    ]
+    effective = logic.get_effective_outside_temperature(10.0, forecast, now)
+    assert effective is not None and effective < 10.0
+    # Too few hourly entries (e.g. a daily forecast): the current value is used.
+    assert logic.get_effective_outside_temperature(10.0, forecast[:2], now) == 10.0
+    assert logic.get_effective_outside_temperature(None, [], now) is None
+
+
+def test_cold_weather_makes_a_formerly_fine_humidity_worth_drying():
+    # 52 % is fine in mild weather but too humid for a living room at 0 °C outside.
+    mild = _evaluate(_metrics(21.0, 52.0), _weather(16.0, 60.0))
+    assert mild.attributes["comfort_humidity_max"] == 55
+    cold = _evaluate(_metrics(21.0, 52.0), _weather(0.0, 70.0))
+    assert cold.attributes["comfort_humidity_max"] == 50.5
+    assert cold.attributes["humidity_target_season"] == "winter"
+    assert cold.attributes["comfort_humidity_base_max"] == 55
+    assert cold.ventilate_now is True and mild.ventilate_now is False

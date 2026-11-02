@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 import math
 from typing import Any
 
@@ -90,6 +90,23 @@ FRESH_AIR_NO_REMINDER_ROOMS = {"bathroom", "basement"}
 # Do not air for fresh air when the outside air is this much warmer than the room.
 FRESH_AIR_MAX_OUTSIDE_WARMER = 2.0
 
+# Seasonal humidity targets. The profile's humidity range is the target in mild
+# weather. When it is cold outside, the upper limit drops (warm moist air
+# condenses on cold outer walls) and the lower limit is relaxed a little (cold
+# air holds almost no moisture, heated rooms cannot stay as humid). When it is
+# warm, the upper limit may rise. The outside temperature used is the average of
+# the next 24 hours, so the targets follow the season instead of flapping
+# between day and night.
+HUMIDITY_COLD_BELOW = 15.0
+HUMIDITY_MAX_DROP_PER_K = 0.3
+HUMIDITY_MAX_DROP_LIMIT = 8.0
+HUMIDITY_MIN_RELAX_PER_K = 0.4
+HUMIDITY_MIN_RELAX_LIMIT = 4.0
+HUMIDITY_WARM_FROM = 20.0
+HUMIDITY_WARM_MAX_BONUS = 5.0
+SEASON_WINTER_BELOW = 8.0
+SEASON_SUMMER_FROM = 18.0
+
 
 def _without_keep_closed(text: str | None) -> str | None:
     """Drop a leading "Fenster geschlossen halten." sentence from an advice text."""
@@ -138,6 +155,63 @@ def get_room_profile(room_type: str) -> dict[str, float]:
         "default": {"humidity_min": 40, "humidity_max": 55, "temp_min": 18, "temp_max": 22, "vent_moderate": 1.0, "vent_strong": 1.5},
     }
     return profiles.get(room_type, profiles["default"])
+
+
+def get_effective_outside_temperature(
+    outside_temp: float | None,
+    forecast: list[dict[str, Any]],
+    now: datetime | None = None,
+) -> float | None:
+    """Average outside temperature of now plus the next 24 hours.
+
+    Falls back to the current temperature without a usable hourly forecast.
+    """
+    reference = now or dt_util.now()
+    temps: list[float] = [outside_temp] if outside_temp is not None else []
+    for entry in forecast:
+        temp = as_float(entry.get("temperature"))
+        entry_dt = _parse_forecast_time(entry.get("datetime"))
+        if temp is None or entry_dt is None:
+            continue
+        if reference <= entry_dt <= reference + timedelta(hours=24):
+            temps.append(temp)
+    # A daily forecast has too few entries for 24 hours to say anything.
+    if len(temps) < 6:
+        return outside_temp
+    return sum(temps) / len(temps)
+
+
+def get_season(effective_outside: float | None) -> str | None:
+    if effective_outside is None:
+        return None
+    if effective_outside < SEASON_WINTER_BELOW:
+        return "winter"
+    if effective_outside >= SEASON_SUMMER_FROM:
+        return "summer"
+    return "transition"
+
+
+def apply_seasonal_humidity(
+    room_type: str,
+    profile: dict[str, float],
+    effective_outside: float | None,
+) -> dict[str, float]:
+    """Return the profile with humidity targets adjusted to the outside temperature."""
+    adjusted = dict(profile)
+    adjusted["humidity_base_min"] = profile["humidity_min"]
+    adjusted["humidity_base_max"] = profile["humidity_max"]
+    if effective_outside is None:
+        return adjusted
+    low, high = profile["humidity_min"], profile["humidity_max"]
+    if effective_outside < HUMIDITY_COLD_BELOW:
+        high -= min(HUMIDITY_MAX_DROP_LIMIT, (HUMIDITY_COLD_BELOW - effective_outside) * HUMIDITY_MAX_DROP_PER_K)
+        low -= min(HUMIDITY_MIN_RELAX_LIMIT, max(0.0, -effective_outside) * HUMIDITY_MIN_RELAX_PER_K)
+    elif effective_outside >= HUMIDITY_WARM_FROM and room_type != "basement":
+        high += HUMIDITY_WARM_MAX_BONUS
+    high = max(high, low + 8)
+    adjusted["humidity_min"] = round(low, 1)
+    adjusted["humidity_max"] = round(high, 1)
+    return adjusted
 
 
 def get_cooling_start(room_type: str, profile: dict[str, float]) -> float | None:
@@ -593,6 +667,7 @@ def calculate_score(
     room: dict[str, Any],
     metrics: dict[str, Any],
     mold_risk: str | None = None,
+    profile: dict[str, float] | None = None,
 ) -> int:
     """Score the room climate from 0 to 100.
 
@@ -602,7 +677,7 @@ def calculate_score(
     the available categories are re-normalised. Without any category the base
     score is derived from temperature and humidity against the room profile.
     """
-    profile = get_room_profile(room.get(CONF_ROOM_TYPE, "default"))
+    profile = profile or get_room_profile(room.get(CONF_ROOM_TYPE, "default"))
     scharlau = metrics.get(CONF_SCHARLAU)
     humidex = normalize_humidex_state(metrics.get(CONF_HUMIDEX))
     dewpoint = metrics.get(CONF_DEWPOINT)
@@ -798,7 +873,9 @@ def evaluate_room(
     wall_quality: str = DEFAULT_WALL_QUALITY,
 ) -> RoomResult:
     room_type = room.get(CONF_ROOM_TYPE, "default")
-    profile = get_room_profile(room_type)
+    effective_outside = get_effective_outside_temperature(outside_weather.get("temperature"), forecast)
+    season = get_season(effective_outside)
+    profile = apply_seasonal_humidity(room_type, get_room_profile(room_type), effective_outside)
     inside_temp = metrics.get(CONF_TEMPERATURE)
     inside_rel = metrics.get(CONF_HUMIDITY)
     inside_abs = metrics.get(CONF_INSIDE_ABSOLUTE_HUMIDITY)
@@ -1023,7 +1100,7 @@ def evaluate_room(
         else:
             next_window = f"Nächstes Lüftungsfenster: sobald die Außentemperatur unter {_de(cooling_window['threshold'])} °C fällt."
 
-    score = calculate_score(room, metrics, mold["level"]) if inputs_available else None
+    score = calculate_score(room, metrics, mold["level"], profile) if inputs_available else None
     humidex_value = metrics.get(CONF_HUMIDEX_VALUE)
     level = (
         get_display_level(score)
@@ -1172,6 +1249,10 @@ def evaluate_room(
         "comfort_temperature_max": profile["temp_max"],
         "comfort_humidity_min": profile["humidity_min"],
         "comfort_humidity_max": profile["humidity_max"],
+        "comfort_humidity_base_min": profile["humidity_base_min"],
+        "comfort_humidity_base_max": profile["humidity_base_max"],
+        "humidity_target_season": season,
+        "effective_outside_temperature": round(effective_outside, 1) if effective_outside is not None else None,
         "mold_risk": mold["level"],
         # Set to False by the coordinator until the risk has lasted a while.
         "mold_risk_active": mold_high,
