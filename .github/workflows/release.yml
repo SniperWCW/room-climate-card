@@ -1,60 +1,92 @@
 name: Release
 
+# A release is created automatically as soon as the version in manifest.json is
+# raised on main (the tag is created together with the release). A pushed
+# version tag or a manual run still works, e.g. to rebuild an existing release.
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to (re)publish, e.g. v0.4.2"
+        description: "Existing tag to (re)publish, e.g. v0.5.1"
         required: true
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
     env:
-      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
 
-      - name: Check tag matches manifest version
+      - name: Work out the release tag
+        id: meta
         run: |
           manifest_version=$(python3 -c "import json; print(json.load(open('custom_components/room_climate/manifest.json'))['version'])")
-          if [ "v${manifest_version}" != "${TAG}" ]; then
-            echo "::error::Tag ${TAG} does not match manifest.json version v${manifest_version}"
-            exit 1
+          if [ "${GITHUB_REF_TYPE}" = "branch" ] && [ -z "${{ github.event.inputs.tag }}" ]; then
+            # Push to main: release only when this version has no tag yet.
+            tag="v${manifest_version}"
+            if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+              echo "Tag ${tag} already exists, nothing to release."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "target=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          else
+            tag="${{ github.event.inputs.tag || github.ref_name }}"
+            if [ "v${manifest_version}" != "${tag}" ]; then
+              echo "::error::Tag ${tag} does not match manifest.json version v${manifest_version}"
+              exit 1
+            fi
           fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-python@v6
+        if: steps.meta.outputs.skip != 'true'
         with:
           python-version: "3.13"
 
       - name: Run unit tests
+        if: steps.meta.outputs.skip != 'true'
         run: |
           pip install pytest
           python -m pytest -q tests --ignore=tests/integration
 
       - uses: actions/setup-node@v5
+        if: steps.meta.outputs.skip != 'true'
         with:
           node-version: "22"
 
       - name: Check card syntax
+        if: steps.meta.outputs.skip != 'true'
         run: node --check custom_components/room_climate/www/room-climate-card.js
 
       - name: Build integration archive
+        if: steps.meta.outputs.skip != 'true'
         run: |
           cd custom_components/room_climate
           zip -r ../../room_climate.zip . -x "__pycache__/*" "*.pyc"
 
       - name: Create GitHub release
+        if: steps.meta.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          TARGET: ${{ steps.meta.outputs.target }}
         run: |
           prerelease=""
           case "${TAG}" in
@@ -62,6 +94,13 @@ jobs:
           esac
           if gh release view "${TAG}" >/dev/null 2>&1; then
             gh release upload "${TAG}" room_climate.zip --clobber
+          elif [ -n "${TARGET}" ]; then
+            # Version raised on main: creates the tag together with the release.
+            gh release create "${TAG}" room_climate.zip \
+              --title "${TAG}" \
+              --generate-notes \
+              --target "${TARGET}" \
+              ${prerelease}
           else
             gh release create "${TAG}" room_climate.zip \
               --title "${TAG}" \

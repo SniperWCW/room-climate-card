@@ -221,6 +221,7 @@ class RoomClimateCard extends HTMLElement {
         freshAirAdvice: esc(attrs.fresh_air_advice || ""),
         freshAirLevel: attrs.fresh_air_level || null,
         co2: this.num(attrs.co2),
+        hoursSinceAired: this.num(attrs.hours_since_aired),
         co2Level: attrs.co2_level || null,
         nextWindow: esc(attrs.next_ventilation_window || ""),
         windowKnown: typeof attrs.window_open === "boolean",
@@ -1574,6 +1575,9 @@ class RoomClimateCard extends HTMLElement {
           room.absoluteHumidity !== null ? `Absolute Feuchte ${this.fmt(room.absoluteHumidity)} g/m³` : "",
           room.orientationLabel ? `Fenster ${room.orientationLabel}${room.solarExposure ? ` · ${room.solarExposure}` : ""}` : "",
           room.windEffect ? `Wind ${room.windEffect}` : "",
+          room.hoursSinceAired !== null && room.windowKnown && !room.windowOpen
+            ? `Zuletzt gelüftet ${room.hoursSinceAired < 1 ? "vor weniger als 1 Std." : `vor ${Math.floor(room.hoursSinceAired)} Std.`}`
+            : "",
           room.nextWindow,
         ].filter(Boolean);
 
