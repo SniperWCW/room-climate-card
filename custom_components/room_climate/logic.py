@@ -14,6 +14,7 @@ from .const import (
     CONF_HUMIDEX,
     CONF_HUMIDEX_VALUE,
     CONF_HUMIDITY,
+    CONF_PRESENCE,
     CONF_INSIDE_ABSOLUTE_HUMIDITY,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
@@ -324,6 +325,15 @@ def get_cooling_duration(cooling_delta: float, wind_speed: float | None, wind_ad
     return max(5, duration)
 
 
+def parse_presence(value: Any) -> bool | None:
+    """Interpret the state of a presence entity: True/False, None if unknown."""
+    if value in ("on", "home", "occupied", "detected"):
+        return True
+    if value in ("off", "not_home", "clear"):
+        return False
+    return None
+
+
 def get_co2_level(co2: float | None) -> str | None:
     if co2 is None:
         return None
@@ -362,8 +372,12 @@ def evaluate_fresh_air(
     outside_temp: float | None,
     inside_temp: float | None,
     too_humid_outside: bool,
+    occupied: bool | None = None,
 ) -> dict[str, Any]:
     """Decide whether airing is useful just to exchange the room air.
+
+    ``occupied`` comes from the optional presence sensor (None = unknown or no
+    sensor): an empty room with a closed window gets no fresh-air advice.
 
     Returns ``active`` (airing is useful now), ``strong``, the ``source``
     ("co2" or "time"), the recommended ``duration`` in minutes, a ``text`` and
@@ -382,6 +396,9 @@ def evaluate_fresh_air(
         and inside_temp is not None
         and outside_temp > inside_temp + FRESH_AIR_MAX_OUTSIDE_WARMER
     )
+
+    if occupied is False and not window_open:
+        return result
 
     if co2 is not None:
         relax = CO2_OPEN_RELAX if window_open else 0.0
@@ -876,6 +893,7 @@ def evaluate_room(
     )
     cooling_climate = bool(inputs_available and can_cool and not (too_humid_outside and not strong_cooling))
     co2 = as_float(metrics.get(CONF_CO2))
+    occupied = parse_presence(metrics.get(CONF_PRESENCE))
     fresh_air = evaluate_fresh_air(
         room_type=room_type,
         co2=co2,
@@ -886,6 +904,7 @@ def evaluate_room(
         outside_temp=outside_temp,
         inside_temp=inside_temp,
         too_humid_outside=too_humid_outside,
+        occupied=occupied,
     )
     # Time-based reminders need the window contact; a measured CO2 value does not.
     fresh_air_active = bool(fresh_air["active"] and (has_window or fresh_air["source"] == "co2"))
@@ -1028,6 +1047,24 @@ def evaluate_room(
     recommendation = " | ".join(recommendation_parts) if recommendation_parts else "Keine Fenstersensor-Empfehlung verfügbar"
 
     ventilate_now = bool(ventilation_beneficial and not window_open)
+    # Push only for reasons worth interrupting someone: drying, cooling, a
+    # measured CO2 value, or a time reminder while the room is occupied (needs
+    # a presence sensor). A plain time reminder stays on the card.
+    ventilate_reasons = [
+        text
+        for text in (
+            fresh_air_text,
+            dehumidify_text if dehumidify_level in {"recommended", "short"} else None,
+            cooling_text if cooling_level == "cooling" else None,
+        )
+        if text
+    ]
+    fresh_air_push_ok = bool(
+        fresh_air_active and (fresh_air["source"] == "co2" or occupied is True)
+    )
+    ventilate_push = bool(
+        ventilate_now and (dehumidify_climate or cooling_climate or fresh_air_push_ok)
+    )
     close_window = bool(window_open and inputs_available and not ventilation_beneficial)
     close_window_reason = (
         "Fenster wieder schließen. Die aktuelle Außenluft bringt gerade keinen klaren Vorteil mehr."
@@ -1112,6 +1149,8 @@ def evaluate_room(
         "fresh_air_level": fresh_air["level"] if fresh_air_active else None,
         "fresh_air_duration": fresh_air["duration"] if fresh_air_active else None,
         "hours_since_aired": metrics.get("hours_since_aired"),
+        "occupied": occupied,
+        "ventilate_advice": " ".join(ventilate_reasons) or None,
         "outside_air_beneficial": outside_air_beneficial,
         "ventilation_beneficial": ventilation_beneficial,
         "ventilate_now": ventilate_now,
@@ -1142,7 +1181,7 @@ def evaluate_room(
         "reduce_heating": reduce_heating,
         "reduce_heating_reason": reduce_heating_reason,
         "notification_flags": {
-            NOTIFICATION_VENTILATE: ventilate_now,
+            NOTIFICATION_VENTILATE: ventilate_push,
             NOTIFICATION_CLOSE_WINDOW: close_window,
             NOTIFICATION_CLOSE_COVER: close_cover,
             NOTIFICATION_MOLD_RISK: mold_high,

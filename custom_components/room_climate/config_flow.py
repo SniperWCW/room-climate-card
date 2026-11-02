@@ -15,6 +15,7 @@ from homeassistant.helpers import area_registry as ar, device_registry as dr, en
 from .const import (
     CONF_CLIMATE,
     CONF_CO2,
+    CONF_PRESENCE,
     CONF_COVER,
     CONF_WALL_QUALITY,
     DEFAULT_WALL_QUALITY,
@@ -90,6 +91,7 @@ def _has_room_supporting_signals(room: dict[str, Any]) -> bool:
         or room.get(CONF_WINDOW)
         or room.get(CONF_COVER)
         or room.get(CONF_CO2)
+        or room.get(CONF_PRESENCE)
         or room.get(CONF_HUMIDEX_VALUE)
         or room.get(CONF_SCHARLAU)
         or room.get(CONF_HUMIDEX)
@@ -133,7 +135,7 @@ def _find_global_sun_entity(hass) -> str:
 def _optional_entity_field(
     key: str,
     defaults: dict[str, Any],
-    domain: str,
+    domain: str | list[str],
 ) -> tuple[vol.Marker, selector.EntitySelector]:
     # Use suggested_value instead of default: with a default, clearing the field
     # in the UI re-inserted the old entity, so optional entities could never be
@@ -194,6 +196,15 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
                 best, best_target = entity_id, target
         return best
 
+    def find_presence_sensor(area_id: str) -> str:
+        for entity_id in entities_by_area.get(area_id, []):
+            if not entity_id.startswith("binary_sensor."):
+                continue
+            state = hass.states.get(entity_id)
+            if state and state.attributes.get("device_class") in {"occupancy", "presence"}:
+                return entity_id
+        return ""
+
     def find_by_device_class(area_id: str, device_class: str, units: set[str]) -> str:
         for entity_id in entities_by_area.get(area_id, []):
             if not entity_id.startswith("sensor."):
@@ -245,6 +256,7 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
                 CONF_COVER: "",
                 CONF_CLIMATE: "",
                 CONF_CO2: "",
+                CONF_PRESENCE: "",
                 CONF_HUMIDEX_VALUE: "",
                 CONF_SCHARLAU: "",
                 CONF_HUMIDEX: "",
@@ -288,6 +300,7 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
         )
         room[CONF_CLIMATE] = room[CONF_CLIMATE] or find_heating_thermostat(area.id)
         room[CONF_CO2] = room[CONF_CO2] or find_by_device_class(area.id, "carbon_dioxide", {"ppm"})
+        room[CONF_PRESENCE] = room[CONF_PRESENCE] or find_presence_sensor(area.id)
         room[CONF_HUMIDEX_VALUE] = room[CONF_HUMIDEX_VALUE] or find_entity_for_area(area.id, ("thermal_comfort", "humidex"))
         room[CONF_SCHARLAU] = room[CONF_SCHARLAU] or find_entity_for_area(area.id, ("thermal_comfort", "sommer_scharlau_gefuhlt"))
         room[CONF_HUMIDEX] = room[CONF_HUMIDEX] or find_entity_for_area(area.id, ("thermal_comfort", "humidex_gefuhlt"))
@@ -431,6 +444,7 @@ def _room_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     cover_field = _optional_entity_field(CONF_COVER, defaults, "cover")
     climate_field = _optional_entity_field(CONF_CLIMATE, defaults, "climate")
     co2_field = _optional_entity_field(CONF_CO2, defaults, "sensor")
+    presence_field = _optional_entity_field(CONF_PRESENCE, defaults, ["binary_sensor", "input_boolean"])
     humidex_value_field = _optional_entity_field(CONF_HUMIDEX_VALUE, defaults, "sensor")
     scharlau_field = _optional_entity_field(CONF_SCHARLAU, defaults, "sensor")
     humidex_field = _optional_entity_field(CONF_HUMIDEX, defaults, "sensor")
@@ -456,6 +470,7 @@ def _room_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             cover_field[0]: cover_field[1],
             climate_field[0]: climate_field[1],
             co2_field[0]: co2_field[1],
+            presence_field[0]: presence_field[1],
             humidex_value_field[0]: humidex_value_field[1],
             scharlau_field[0]: scharlau_field[1],
             humidex_field[0]: humidex_field[1],

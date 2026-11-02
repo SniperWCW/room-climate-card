@@ -299,6 +299,7 @@ def _fresh(**overrides):
         "outside_temp": 4.0,
         "inside_temp": 21.0,
         "too_humid_outside": False,
+        "occupied": None,
     }
     params.update(overrides)
     return logic.evaluate_fresh_air(**params)
@@ -377,3 +378,47 @@ def test_room_time_reminder_requires_window_sensor(monkeypatch):
     room = {k: v for k, v in ROOM.items() if k not in {"window"}}
     without = _evaluate(_metrics(21.0, 45.0, window=None, hours_since_aired=7.0), weather, room)
     assert without.attributes["fresh_air_needed"] is False
+
+
+# --- Presence sensor and push gating ----------------------------------------
+
+def test_presence_sensor_silences_empty_rooms():
+    assert _fresh(co2=1500, occupied=False)["active"] is False
+    assert _fresh(hours_since_aired=7.0, occupied=False)["active"] is False
+    assert _fresh(co2=1500, occupied=True)["active"] is True
+    assert _fresh(co2=1500, occupied=None)["active"] is True
+    # An already open window keeps its advice.
+    assert _fresh(co2=1500, occupied=False, window_open=True)["active"] is True
+
+
+def test_parse_presence():
+    assert logic.parse_presence("on") is True
+    assert logic.parse_presence("off") is False
+    assert logic.parse_presence("unavailable") is None
+    assert logic.parse_presence(None) is None
+
+
+def test_time_reminder_only_pushes_when_room_is_occupied(monkeypatch):
+    noon = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(logic.dt_util, "now", lambda: noon)
+    weather = _weather(4.0, 80.0)
+    flag = logic.NOTIFICATION_VENTILATE
+
+    plain = _evaluate(_metrics(21.0, 45.0, hours_since_aired=7.0), weather)
+    assert plain.ventilate_now is True
+    assert plain.attributes["notification_flags"][flag] is False
+
+    occupied = _evaluate(_metrics(21.0, 45.0, hours_since_aired=7.0, presence="on"), weather)
+    assert occupied.attributes["notification_flags"][flag] is True
+    assert "stoßlüften" in occupied.attributes["ventilate_advice"]
+
+    empty = _evaluate(_metrics(21.0, 45.0, hours_since_aired=7.0, presence="off"), weather)
+    assert empty.ventilate_now is False
+
+
+def test_co2_pushes_and_message_uses_only_the_active_reason():
+    weather = _weather(4.0, 80.0)
+    result = _evaluate(_metrics(21.0, 45.0, co2=1500.0), weather)
+    assert result.attributes["notification_flags"][logic.NOTIFICATION_VENTILATE] is True
+    advice = result.attributes["ventilate_advice"]
+    assert advice.startswith("Fenster öffnen") and "geschlossen halten" not in advice

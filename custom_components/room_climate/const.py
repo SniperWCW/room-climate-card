@@ -30,6 +30,7 @@ CONF_COVER = "cover"
 CONF_ROOM_NOTIFICATIONS = "notifications_enabled"
 CONF_CLIMATE = "climate"
 CONF_CO2 = "co2"
+CONF_PRESENCE = "presence"
 CONF_WALL_QUALITY = "wall_quality"
 
 # Temperature factor f_Rsi of the coldest relevant wall surface (DIN 4108-2):
@@ -80,6 +81,7 @@ OPTIONAL_ROOM_ENTITY_KEYS = (
     "cover",
     "climate",
     "co2",
+    "presence",
     "humidex_value",
     "scharlau",
     "humidex",

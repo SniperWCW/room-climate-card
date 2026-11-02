@@ -113,6 +113,14 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._notification_store = Store[dict[str, Any]](
             hass, 1, f"{DOMAIN}.{entry.entry_id}.notification_state"
         )
+        # When each room's window was last open (end of the last airing). Persisted,
+        # so the "not aired for hours" timer survives a Home Assistant restart.
+        self._last_aired: dict[str, datetime] = {}
+        self._was_open: dict[str, bool] = {}
+        self._aired_dirty = False
+        self._aired_store = Store[dict[str, str]](
+            hass, 1, f"{DOMAIN}.{entry.entry_id}.last_aired"
+        )
 
     async def _async_restore_notification_state(self) -> None:
         """Restore notification state before the first coordinator refresh."""
@@ -132,9 +140,50 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 key: value for key, value in stored_flags.items() if isinstance(key, str) and isinstance(value, bool)
             }
 
+    async def _async_restore_last_aired(self) -> None:
+        stored = await self._aired_store.async_load() or {}
+        if isinstance(stored, dict):
+            self._last_aired = {
+                key: timestamp
+                for key, value in stored.items()
+                if isinstance(key, str)
+                and isinstance(value, str)
+                and (timestamp := dt_util.parse_datetime(value)) is not None
+            }
+
+    async def _async_save_last_aired(self) -> None:
+        self._aired_dirty = False
+        await self._aired_store.async_save(
+            {key: value.isoformat() for key, value in self._last_aired.items()}
+        )
+
+    def _update_last_aired(self, room: dict[str, Any], window_state: str | None) -> float | None:
+        """Track when the room was last aired and return the hours since then.
+
+        While the window is open the time keeps moving; the value is persisted
+        when the window closes (and once when a room is first seen).
+        """
+        room_id = room["id"]
+        now = dt_util.utcnow()
+        if window_state in OPEN_STATES:
+            self._last_aired[room_id] = now
+            self._was_open[room_id] = True
+            return None
+        if window_state not in {"off", "closed"}:
+            return None
+        if self._was_open.pop(room_id, False):
+            self._last_aired[room_id] = now
+            self._aired_dirty = True
+        elif room_id not in self._last_aired:
+            # First sighting without history: start counting now, do not nag.
+            self._last_aired[room_id] = now
+            self._aired_dirty = True
+        return round(max(0.0, (now - self._last_aired[room_id]).total_seconds() / 3600), 2)
+
     async def async_config_entry_first_refresh(self) -> None:
         """Load persisted state before calculating recommendations."""
         await self._async_restore_notification_state()
+        await self._async_restore_last_aired()
         stored_sessions = await self._session_store.async_load()
         self._sessions = stored_sessions if isinstance(stored_sessions, dict) else {}
         await super().async_config_entry_first_refresh()
@@ -380,18 +429,18 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 metrics[key] = self._get_state(entity_id)
             else:
                 metrics[key] = as_float(self._get_state(entity_id))
-        # How long the window has been open / closed (for the fresh-air advice).
-        # A restart resets the state's last_changed, which restarts the timer.
+        # How long the window has been open / since the room was last aired.
         metrics["window_open_minutes"] = None
-        metrics["hours_since_aired"] = None
         window_entity = room.get("window")
         window_state = self.hass.states.get(window_entity) if window_entity else None
-        if window_state is not None:
-            age_hours = (dt_util.utcnow() - window_state.last_changed).total_seconds() / 3600
-            if window_state.state in OPEN_STATES:
-                metrics["window_open_minutes"] = round(age_hours * 60, 1)
-            elif window_state.state in {"off", "closed"}:
-                metrics["hours_since_aired"] = round(age_hours, 2)
+        if window_state is not None and window_state.state in OPEN_STATES:
+            metrics["window_open_minutes"] = round(
+                (dt_util.utcnow() - window_state.last_changed).total_seconds() / 60, 1
+            )
+        metrics["hours_since_aired"] = (
+            self._update_last_aired(room, window_state.state) if window_state is not None else None
+        )
+        metrics["presence"] = self._get_state(room.get("presence"))
         primary_input_ages: dict[str, float | None] = {}
         for key in ("temperature", "humidity"):
             entity_id = room.get(key)
@@ -448,7 +497,8 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         domain, service = service_name.split(".", 1)
         title = f"Raumklima: {room.name}"
         message_map = {
-            NOTIFICATION_VENTILATE: f"Lüften lohnt sich jetzt. {room.recommendation}",
+            NOTIFICATION_VENTILATE: room.attributes.get("ventilate_advice")
+            or f"Lüften lohnt sich jetzt. {room.recommendation}",
             NOTIFICATION_CLOSE_WINDOW: room.close_window_reason
             or "Fenster wieder schließen. Die aktuelle Außenluft bringt keinen Vorteil mehr.",
             NOTIFICATION_CLOSE_COVER: "Rollladen schließen empfohlen. Direkter Sonneneintrag heizt den Raum aktuell weiter auf.",
@@ -488,7 +538,9 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 window_open_for is None or window_open_for >= CLOSE_WINDOW_GRACE_MINUTES
             )
             flags = {
-                NOTIFICATION_VENTILATE: room.ventilate_now,
+                NOTIFICATION_VENTILATE: bool(
+                    room.attributes.get("notification_flags", {}).get(NOTIFICATION_VENTILATE, room.ventilate_now)
+                ),
                 NOTIFICATION_CLOSE_WINDOW: close_window_due,
                 NOTIFICATION_CLOSE_COVER: room.close_cover,
                 NOTIFICATION_MOLD_RISK: room.mold_risk,
@@ -720,6 +772,9 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             result.attributes["outside_absolute_humidity_source"] = outside_abs_source
             room_results[result.room_id] = result
+
+        if self._aired_dirty:
+            await self._async_save_last_aired()
 
         self._confirm_mold_risk(room_results, dt_util.utcnow())
 

@@ -78,12 +78,14 @@
           "dewpoint": "Taupunkt gefühlt",
           "notifications_enabled": "Push für diesen Raum aktivieren",
           "climate": "Thermostat / Heizung",
-          "co2": "CO₂-Sensor"
+          "co2": "CO₂-Sensor",
+          "presence": "Anwesenheitssensor"
         },
         "data_description": {
           "inside_absolute_humidity": "Optional. Ohne Sensor wird der Wert aus Temperatur und Luftfeuchtigkeit berechnet.",
           "climate": "Optional. Ermöglicht Hinweise zum Herunterregeln der Heizung und erkennt die Heizsaison.",
-          "co2": "Optional. Mit CO₂-Sensor richtet sich die Frischluft-Empfehlung nach der gemessenen Luftqualität (ab ca. 1000 ppm). Ohne Sensor erscheint eine Erinnerung, wenn der Raum einige Stunden nicht gelüftet wurde."
+          "co2": "Optional. Mit CO₂-Sensor richtet sich die Frischluft-Empfehlung nach der gemessenen Luftqualität (ab ca. 1000 ppm). Ohne Sensor erscheint eine Erinnerung, wenn der Raum einige Stunden nicht gelüftet wurde.",
+          "presence": "Optional. Belegungs-/Anwesenheitssensor des Raums. Frischluft-Erinnerungen und ihre Push-Meldungen kommen nur, solange jemand im Raum ist."
         }
       },
       "edit_room_select": {
@@ -110,12 +112,14 @@
           "dewpoint": "Taupunkt gefühlt",
           "notifications_enabled": "Push für diesen Raum aktivieren",
           "climate": "Thermostat / Heizung",
-          "co2": "CO₂-Sensor"
+          "co2": "CO₂-Sensor",
+          "presence": "Anwesenheitssensor"
         },
         "data_description": {
           "inside_absolute_humidity": "Optional. Ohne Sensor wird der Wert aus Temperatur und Luftfeuchtigkeit berechnet.",
           "climate": "Optional. Ermöglicht Hinweise zum Herunterregeln der Heizung und erkennt die Heizsaison.",
-          "co2": "Optional. Mit CO₂-Sensor richtet sich die Frischluft-Empfehlung nach der gemessenen Luftqualität (ab ca. 1000 ppm). Ohne Sensor erscheint eine Erinnerung, wenn der Raum einige Stunden nicht gelüftet wurde."
+          "co2": "Optional. Mit CO₂-Sensor richtet sich die Frischluft-Empfehlung nach der gemessenen Luftqualität (ab ca. 1000 ppm). Ohne Sensor erscheint eine Erinnerung, wenn der Raum einige Stunden nicht gelüftet wurde.",
+          "presence": "Optional. Belegungs-/Anwesenheitssensor des Raums. Frischluft-Erinnerungen und ihre Push-Meldungen kommen nur, solange jemand im Raum ist."
         }
       },
       "remove_room": {

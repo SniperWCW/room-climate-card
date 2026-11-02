@@ -78,12 +78,14 @@
           "dewpoint": "Dew point perception",
           "notifications_enabled": "Enable push for this room",
           "climate": "Thermostat / heating",
-          "co2": "CO₂ sensor"
+          "co2": "CO₂ sensor",
+          "presence": "Presence sensor"
         },
         "data_description": {
           "inside_absolute_humidity": "Optional. Without a sensor, it is calculated from temperature and humidity.",
           "climate": "Optional. Enables hints to turn down the heating and detects the heating season.",
-          "co2": "Optional. With a CO₂ sensor, fresh-air advice follows the measured air quality (from about 1000 ppm). Without one, a reminder appears when the room has not been aired for a few hours."
+          "co2": "Optional. With a CO₂ sensor, fresh-air advice follows the measured air quality (from about 1000 ppm). Without one, a reminder appears when the room has not been aired for a few hours.",
+          "presence": "Optional. Occupancy/presence sensor of the room. Fresh-air reminders and their push messages are only sent while someone is in the room."
         }
       },
       "edit_room_select": {
@@ -110,12 +112,14 @@
           "dewpoint": "Dew point perception",
           "notifications_enabled": "Enable push for this room",
           "climate": "Thermostat / heating",
-          "co2": "CO₂ sensor"
+          "co2": "CO₂ sensor",
+          "presence": "Presence sensor"
         },
         "data_description": {
           "inside_absolute_humidity": "Optional. Without a sensor, it is calculated from temperature and humidity.",
           "climate": "Optional. Enables hints to turn down the heating and detects the heating season.",
-          "co2": "Optional. With a CO₂ sensor, fresh-air advice follows the measured air quality (from about 1000 ppm). Without one, a reminder appears when the room has not been aired for a few hours."
+          "co2": "Optional. With a CO₂ sensor, fresh-air advice follows the measured air quality (from about 1000 ppm). Without one, a reminder appears when the room has not been aired for a few hours.",
+          "presence": "Optional. Occupancy/presence sensor of the room. Fresh-air reminders and their push messages are only sent while someone is in the room."
         }
       },
       "remove_room": {
