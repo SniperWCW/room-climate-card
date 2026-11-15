@@ -366,6 +366,22 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._climate_entity_cache[room_id] = candidates
         return candidates
 
+    def _smartdome_window_pause(self, climate_entity: str | None) -> bool:
+        """True while Smartdome Heat Control pauses this thermostat for an open window.
+
+        Smartdome's room status sensors list their thermostats and report
+        ``window_pause_active``; no extra configuration is needed.
+        """
+        if not climate_entity:
+            return False
+        for state in self.hass.states.async_all("sensor"):
+            attrs = state.attributes
+            if attrs.get("window_pause_active") is True and climate_entity in (
+                attrs.get("thermostats") or []
+            ):
+                return True
+        return False
+
     def _resolve_climate_entity(self, room: dict[str, Any]) -> str | None:
         """Return the room's thermostat.
 
@@ -484,6 +500,7 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         climate_entity = self._resolve_climate_entity(room)
         climate_state = self.hass.states.get(climate_entity) if climate_entity else None
         metrics["climate_entity"] = climate_entity
+        metrics["smartdome_window_pause"] = self._smartdome_window_pause(climate_entity)
         metrics["climate"] = (
             {
                 "state": climate_state.state,

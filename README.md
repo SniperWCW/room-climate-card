@@ -81,6 +81,10 @@ For each configured room, the integration creates:
 - `binary_sensor.<room>_close_window`
 - `binary_sensor.<room>_close_cover`
 
+## Smartdome Heat Control
+
+If [Smartdome Heat Control](https://github.com/SniperWCW/smartdome_heat_control) (3.7.0 or newer) controls the room's thermostat, no configuration is needed: while Smartdome pauses the thermostat for an open window, the "reduce heating" hint is suppressed and the room attribute `heating_handled_by` is `smartdome`. Smartdome's room status sensors list their thermostats, Room Climate matches them against the room's thermostat.
+
 ## Notes
 
 - Push notifications are sent only when the recommendation changes from inactive to active.

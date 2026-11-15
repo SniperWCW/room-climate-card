@@ -1168,7 +1168,12 @@ def evaluate_room(
             mold_reason += " Regelmäßig stoßlüften und den Raum gleichmäßig beheizen."
 
     reduce_heating_reason = None
-    if inputs_available and heating["enabled"] and window_open:
+    # Smartdome Heat Control pauses the thermostat on its own while the window
+    # is open, so there is nothing left for the user to turn down.
+    smartdome_pause = bool(metrics.get("smartdome_window_pause"))
+    if inputs_available and heating["enabled"] and window_open and smartdome_pause:
+        reduce_heating_reason = None
+    elif inputs_available and heating["enabled"] and window_open:
         reduce_heating_reason = "Fenster offen – Thermostat herunterregeln, solange gelüftet wird."
     elif (
         inputs_available
@@ -1264,6 +1269,7 @@ def evaluate_room(
         "heating_active": heating["active"],
         "heating_target_temperature": heating["target"],
         "reduce_heating": reduce_heating,
+        "heating_handled_by": "smartdome" if smartdome_pause else None,
         "reduce_heating_reason": reduce_heating_reason,
         "notification_flags": {
             NOTIFICATION_VENTILATE: ventilate_push,

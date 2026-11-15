@@ -269,6 +269,15 @@ def test_open_window_with_heating_on_suggests_turning_it_down():
     assert "Fenster offen" in result.reduce_heating_reason
 
 
+def test_smartdome_window_pause_replaces_turn_down_hint():
+    metrics = _metrics(21.0, 50.0, window="on")
+    metrics["climate"] = {"state": "heat", "hvac_action": "heating", "target_temperature": 21, "current_temperature": 20.5}
+    metrics["smartdome_window_pause"] = True
+    result = _evaluate(metrics, _weather(5.0, 80.0))
+    assert result.reduce_heating is False
+    assert result.attributes["heating_handled_by"] == "smartdome"
+
+
 def test_frost_protection_is_not_reported_as_heating():
     metrics = _metrics(21.0, 50.0, window="on")
     metrics["climate"] = {"state": "heat", "hvac_action": "idle", "target_temperature": 7, "current_temperature": 20.5}
