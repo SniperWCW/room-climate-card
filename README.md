@@ -90,7 +90,7 @@ If [Smartdome Heat Control](https://github.com/SniperWCW/smartdome_heat_control)
 - Push notifications are sent only when the recommendation changes from inactive to active.
 - A configurable cooldown prevents repeated notifications. "Close window" pushes wait until the window has been open for 3 minutes.
 - The `Score` exposes `inputs_available` and `data_quality`. A score is only calculated when current room temperature and humidity readings are available; readings that have not been reported for more than 3 hours are marked `stale`. Missing or stale readings never trigger ventilation, close-window or cover actions.
-- The score uses Thermal Comfort sensors (Scharlau, Humidex, dew point, Simmer) when configured. Without them it is calculated from temperature and humidity against the room profile, so rooms without these sensors can still reach "Ideal".
+- Comfort values (dew point, Humidex, Summer Simmer, Summer Scharlau) are calculated from temperature and humidity, so the Thermal Comfort integration is not needed any more; the results are identical to its sensors. The score uses these categories in every room. The room attribute `comfort_source` shows `calculated`, `sensor` or `mixed`. Sensors entered in the room settings still override the calculation (optional). Sensors of the Thermal Comfort integration that were configured earlier are removed from the room settings automatically on update.
 - Weather values are converted to °C and km/h regardless of the units of the weather entity.
 - Requires Home Assistant 2025.2 or newer.
 - Regular calculations run every five minutes. Window changes trigger an immediate refresh, and an active ventilation session refreshes once per minute.

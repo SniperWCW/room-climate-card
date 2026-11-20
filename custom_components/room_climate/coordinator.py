@@ -17,6 +17,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
+from .comfort import fill_comfort_metrics
 from .const import (
     CONF_CLIMATE,
     CONF_HOME_PRESENCE,
@@ -460,6 +461,9 @@ class RoomClimateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 metrics[key] = self._get_state(entity_id)
             else:
                 metrics[key] = as_float(self._get_state(entity_id))
+        # Comfort categories come from a configured sensor when it delivers a
+        # value; otherwise they are calculated from temperature and humidity.
+        fill_comfort_metrics(metrics)
         # How long the window has been open / since the room was last aired.
         metrics["window_open_minutes"] = None
         window_entity = room.get("window")

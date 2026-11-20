@@ -29,6 +29,16 @@ CONF_SCHARLAU = "scharlau"
 CONF_HUMIDEX = "humidex"
 CONF_SIMMER = "simmer"
 CONF_DEWPOINT = "dewpoint"
+# Entities of this platform are no longer needed: the values are calculated here.
+THERMAL_COMFORT_PLATFORM = "thermal_comfort"
+THERMAL_COMFORT_KEYS = (
+    CONF_INSIDE_ABSOLUTE_HUMIDITY,
+    CONF_HUMIDEX_VALUE,
+    CONF_SCHARLAU,
+    CONF_HUMIDEX,
+    CONF_SIMMER,
+    CONF_DEWPOINT,
+)
 CONF_WINDOW = "window"
 CONF_COVER = "cover"
 CONF_ROOM_NOTIFICATIONS = "notifications_enabled"

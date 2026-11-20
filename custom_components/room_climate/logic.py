@@ -1218,6 +1218,7 @@ def evaluate_room(
         "scharlau_felt": metrics.get(CONF_SCHARLAU),
         "simmer_felt": metrics.get(CONF_SIMMER),
         "dewpoint_felt": metrics.get(CONF_DEWPOINT),
+        "comfort_source": metrics.get("comfort_source"),
         "inputs_available": inputs_available,
         "data_quality": data_quality,
         "input_age_minutes": metrics.get("input_age_minutes"),

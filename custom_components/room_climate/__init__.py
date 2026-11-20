@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from homeassistant.components.frontend import add_extra_js_url, remove_extra_js_url
 from homeassistant.components.http import StaticPathConfig
@@ -9,7 +10,15 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
 
-from .const import CARD_FILENAME, CARD_URL_PATH, CONF_ROOMS, DOMAIN, PLATFORMS
+from .const import (
+    CARD_FILENAME,
+    CARD_URL_PATH,
+    CONF_ROOMS,
+    DOMAIN,
+    PLATFORMS,
+    THERMAL_COMFORT_KEYS,
+    THERMAL_COMFORT_PLATFORM,
+)
 from .coordinator import RoomClimateConfigEntry, RoomClimateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -79,11 +88,47 @@ def _prune_removed_room_registry_entries(hass: HomeAssistant, entry: ConfigEntry
             device_registry.async_remove_device(device_entry.id)
 
 
+def _drop_thermal_comfort_sensors(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Forget configured Thermal Comfort sensors; the values are calculated now.
+
+    The calculation gives the same categories from temperature and humidity.
+    Sensors of other integrations stay configured as overrides.
+    """
+    registry = er.async_get(hass)
+    for container_name in ("options", "data"):
+        container = getattr(entry, container_name)
+        rooms = container.get(CONF_ROOMS)
+        if not isinstance(rooms, list):
+            continue
+        changed = False
+        cleaned: list[Any] = []
+        for room in rooms:
+            if not isinstance(room, dict):
+                cleaned.append(room)
+                continue
+            room = dict(room)
+            for key in THERMAL_COMFORT_KEYS:
+                entity_id = room.get(key)
+                registry_entry = registry.async_get(entity_id) if entity_id else None
+                if registry_entry is not None and registry_entry.platform == THERMAL_COMFORT_PLATFORM:
+                    room[key] = ""
+                    changed = True
+            cleaned.append(room)
+        if changed:
+            new_container = {**container, CONF_ROOMS: cleaned}
+            if container_name == "options":
+                hass.config_entries.async_update_entry(entry, options=new_container)
+            else:
+                hass.config_entries.async_update_entry(entry, data=new_container)
+            _LOGGER.info("Room Climate no longer uses Thermal Comfort sensors; values are calculated")
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: RoomClimateConfigEntry) -> bool:
+    _drop_thermal_comfort_sensors(hass, entry)
     coordinator = RoomClimateCoordinator(hass, entry)
     entry.runtime_data = coordinator
     # hass.data only keeps the shared card registration state.

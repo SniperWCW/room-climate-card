@@ -52,6 +52,7 @@ from .const import (
     DOMAIN,
     ROOM_TYPE_OPTIONS,
     WINDOW_ORIENTATION_OPTIONS,
+    THERMAL_COMFORT_PLATFORM,
 )
 from .logic import slugify
 
@@ -167,6 +168,8 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
     entities_by_area: dict[str, list[str]] = {}
     for entity_id in states:
         entity_entry = entities.async_get(entity_id)
+        if entity_entry and entity_entry.platform == THERMAL_COMFORT_PLATFORM:
+            continue
         area_id = entity_entry.area_id if entity_entry else None
         if not area_id and entity_entry and entity_entry.device_id:
             device_entry = devices.async_get(entity_entry.device_id)
@@ -310,15 +313,13 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
         room[CONF_CLIMATE] = room[CONF_CLIMATE] or find_heating_thermostat(area.id)
         room[CONF_CO2] = room[CONF_CO2] or find_by_device_class(area.id, "carbon_dioxide", {"ppm"})
         room[CONF_PRESENCE] = room[CONF_PRESENCE] or find_presence_sensor(area.id)
-        room[CONF_HUMIDEX_VALUE] = room[CONF_HUMIDEX_VALUE] or find_entity_for_area(area.id, ("thermal_comfort", "humidex"))
-        room[CONF_SCHARLAU] = room[CONF_SCHARLAU] or find_entity_for_area(area.id, ("thermal_comfort", "sommer_scharlau_gefuhlt"))
-        room[CONF_HUMIDEX] = room[CONF_HUMIDEX] or find_entity_for_area(area.id, ("thermal_comfort", "humidex_gefuhlt"))
-        room[CONF_SIMMER] = room[CONF_SIMMER] or find_entity_for_area(area.id, ("thermal_comfort", "sommer_simmer_gefuhlt"))
-        room[CONF_DEWPOINT] = room[CONF_DEWPOINT] or find_entity_for_area(area.id, ("thermal_comfort", "taupunkt_gefuhlt"))
 
     for entity_id in states:
         domain, _, object_id = entity_id.partition(".")
         if domain not in {"sensor", "binary_sensor", "cover"} or not object_id:
+            continue
+        slug_entry = entities.async_get(entity_id)
+        if slug_entry and slug_entry.platform == THERMAL_COMFORT_PLATFORM:
             continue
         slug = _normalized_slug(object_id)
         parts = [part for part in slug.split("_") if part and part not in ignore_parts]
@@ -339,16 +340,6 @@ def _detect_rooms(hass) -> list[dict[str, Any]]:
             room[CONF_HUMIDITY] = room[CONF_HUMIDITY] or entity_id
         elif "absolute_luftfeuchtigkeit" in slug or "absolute_humidity" in slug:
             room[CONF_INSIDE_ABSOLUTE_HUMIDITY] = room[CONF_INSIDE_ABSOLUTE_HUMIDITY] or entity_id
-        elif "scharlau" in slug:
-            room[CONF_SCHARLAU] = room[CONF_SCHARLAU] or entity_id
-        elif re.search(r"humidex.*gefuhlt|gefuhlt.*humidex", slug):
-            room[CONF_HUMIDEX] = room[CONF_HUMIDEX] or entity_id
-        elif "humidex" in slug:
-            room[CONF_HUMIDEX_VALUE] = room[CONF_HUMIDEX_VALUE] or entity_id
-        elif "simmer" in slug:
-            room[CONF_SIMMER] = room[CONF_SIMMER] or entity_id
-        elif "taupunkt" in slug:
-            room[CONF_DEWPOINT] = room[CONF_DEWPOINT] or entity_id
 
     return [
         room
